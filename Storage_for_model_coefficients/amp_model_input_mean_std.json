@@ -1,0 +1,22 @@
+{
+"Bx_mean" : 0.084,
+"Bx_std"  : 3.366,
+"By_mean" : -0.008,
+"By_std"  : 3.928,
+"Bz_mean" : 0.00193,
+"Bz_std"  : 3.392,
+"Vx_mean" : -409.66,
+"Vx_std"  : 89.08,
+"Np_mean" : 5.90,
+"Np_std"  : 4.80,
+"au_mean" : 238.28,
+"au_std"  : 1493.80,
+"al_mean" : -234.71,
+"al_std"  : 1099.24,
+"symh_mean" : -10.52,
+"symh_std"  : 16.68,
+"asymh_mean" : 19.06,
+"asymh_std"  : 13.88,
+"F107_mean" : 116.59,
+"F107_std"  : 27.94
+}

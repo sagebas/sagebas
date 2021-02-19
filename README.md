@@ -6,15 +6,20 @@ The program GGF_RTF.py makes a real-time forecast of the external magnetic field
  Survey magnetometer stations: Eskdalemuir, Hartland and Lerwick.
  
  Output file column format is as follows.
-  Day-Month-Year    Hour:Minute    [Model Type Flag]    Esk x    Esk y    Esk z    Had x    Had y    Had z    Ler x    Ler y    Ler z
+  Day-Month-Year    Hour:Minute    [Model Type Flag]    Substorm onset probability    Esk x    Esk y    Esk z    Had x    Had y    Had z    Ler x    Ler y    Ler z
 
  Where: 
  'Esk' is the observatory Eskdalemuir, 'Har' is Hartland, 'Ler' is 
   Lerwick, and 'x','y','z' are the ground geomagnetic field perturbation 
   components.
+ The substorm onset probability defines the onset likelihood (from 0 to 1, 
+  with 1 the most likely), for the hour following the model run time. Hence, 
+  the onset forecast is only valid for that hour: the output file has nan 
+  values for onset probabilities at forecast epochs greater than [current time
+  + 60 mins].
  The Model Type Flag has the following meanings.
   0: no problems: model forecast is based on the epsilon coupling function.
-  1: plasma data were not available for this epoch of the real-time soalr wind 
+  1: plasma data were not available for this epoch of the real-time solar wind 
       stream, so the forcast is based on just the magnetometer data, using the
       coupling function (IMF_magnitude^3) * (sin(clock_angle/2)^4).
   2: no solar wind data were available, so the output is nan.
@@ -23,4 +28,4 @@ The program GGF_RTF.py makes a real-time forecast of the external magnetic field
  -- Don't compute dB/dt when there is a flag change.
  -- GGF baselines are preliminary values, and will change.
  
-author: Robert Shore: robore@bas.ac.uk
+@author: Robert Shore: robore@bas.ac.uk

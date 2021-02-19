@@ -5,15 +5,20 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
  Survey magnetometer stations: Eskdalemuir, Hartland and Lerwick.
  
  Output file column format is as follows.
-  Day-Month-Year    Hour:Minute    [Model Type Flag]    Esk x    Esk y    Esk z    Had x    Had y    Had z    Ler x    Ler y    Ler z
+  Day-Month-Year    Hour:Minute    [Model Type Flag]    Substorm onset probability    Esk x    Esk y    Esk z    Had x    Had y    Had z    Ler x    Ler y    Ler z
 
  Where: 
  'Esk' is the observatory Eskdalemuir, 'Har' is Hartland, 'Ler' is 
   Lerwick, and 'x','y','z' are the ground geomagnetic field perturbation 
   components.
+ The substorm onset probability defines the onset likelihood (from 0 to 1, 
+  with 1 the most likely), for the hour following the model run time. Hence, 
+  the onset forecast is only valid for that hour: the output file has nan 
+  values for onset probabilities at forecast epochs greater than [current time
+  + 60 mins].
  The Model Type Flag has the following meanings.
   0: no problems: model forecast is based on the epsilon coupling function.
-  1: plasma data were not available for this epoch of the real-time soalr wind 
+  1: plasma data were not available for this epoch of the real-time solar wind 
       stream, so the forcast is based on just the magnetometer data, using the
       coupling function (IMF_magnitude^3) * (sin(clock_angle/2)^4).
   2: no solar wind data were available, so the output is nan.
@@ -24,14 +29,14 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
  
 @author: Robert Shore: robore@bas.ac.uk
 """
-output_version_identifier = 'BRTFv1p2'#Version string, for author's reference.
+output_version_identifier = 'BRTFv1p3'#Version string, for author's reference.
 
 #%% Load packages.
 
 #Import these packages.
-import wget
-import os
 import sys
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'#suppresses tensorflow warnings.
 import json
 import numpy as np
 import datetime
@@ -41,6 +46,10 @@ import matplotlib
 import time
 import math
 import pickle
+import keras
+import pandas
+import glob
+import urllib.request
 
 #Set geometric constants.
 #Degrees to radians
@@ -124,24 +133,16 @@ with open(VFERv2p0_coeffs_filename,'rb') as f:  # Python 3: open(..., 'rb')
 #Define url of real-time solar wind data.
 real_time_solar_wind_data_url = 'https://services.swpc.noaa.gov/products/geospace/propagated-solar-wind.json'
 
-#Define location that the real-time data will be stored locally.
-real_time_solar_wind_data_filename = os.path.join(os.getcwd(),'Temp_storage_for_real_time_solar_wind_data','Geospace_propagated_solar_wind.dat')
+#Import real-time solar wind data as a list object
+real_time_solar_wind_data_list = json.loads(urllib.request.urlopen(real_time_solar_wind_data_url).read().decode())
 
-#Download solar wind data for the last week.
-wget.download(real_time_solar_wind_data_url, real_time_solar_wind_data_filename)
-#Approach from https://stackabuse.com/download-files-with-python/.
-
-#Import the solar wind data file to the workspace.
-with open(real_time_solar_wind_data_filename,'rb') as json_file:
-    real_time_solar_wind_data = np.array(json.load(json_file))#np array of string objects, size [((single header row) plus (minutes in week)) by 12]. Note: each row is a sub-array of size [1 by 12].
+#Convert the real-time solar wind data list to a numpy array.
+real_time_solar_wind_data = np.array(real_time_solar_wind_data_list)#np array of string objects, size [((single header row) plus (minutes in week)) by 12]. Note: each row is a sub-array of size [1 by 12].
 #Column format: 'time_tag', 'speed', 'density', 'temperature', 'bx', 'by', 'bz',
 # 'bt', 'vx', 'vy', 'vz', 'propagated_time_tag'.
 
 #Remove header.
 real_time_solar_wind_data = np.delete(real_time_solar_wind_data,0,axis=0)#np array of string objects, size [minutes in week by 12]. Note: each row is a sub-array of size [1 by 12].
-
-#Remove the downloaded file from local memory.
-os.remove(real_time_solar_wind_data_filename)
 
 #%% Process solar wind temporal data: add enough time-shifts to match the model's expected input data time-lag.
 #Summary of required time shifts.
@@ -491,6 +492,117 @@ for i_t in range(np.shape(shifted_times_regular_grid)[0]):
     #End loop over BGS components.
 #End loop over each temporal element of the recent solar wind data subset.
 
+#%% Make the substorm onset probability forecast.
+
+#Initiate some model options.
+omn_pred_hist=120
+omn_train_params=["Bx", "By", "Bz", "Vx", "Np"]
+
+
+#Convert the real_time_solar_wind_data_list vaiable (loaded earlier) to a 
+# pandas dataframe: use the first record (the header) to define the columns 
+# names, and set the values from the remainder of the variable.
+real_time_solar_wind_data_df = pandas.DataFrame.from_records(real_time_solar_wind_data_list[1:],columns=real_time_solar_wind_data_list[0])
+
+#Convert timestamps to datetime.
+real_time_solar_wind_data_df["time_tag"] = pandas.to_datetime(real_time_solar_wind_data_df["time_tag"] )
+real_time_solar_wind_data_df["propagated_time_tag"] = pandas.to_datetime(real_time_solar_wind_data_df["propagated_time_tag"] )
+
+#Assuming that the time tags are pre-propagated to the bow shock (which they 
+# are not, but this is how Bharat set up his model), add a 10 min propagation 
+# delay to the magnetopause.
+real_time_solar_wind_data_df["time_tag"] = real_time_solar_wind_data_df["time_tag"] + datetime.timedelta(minutes=10)
+real_time_solar_wind_data_df["propagated_time_tag"] = real_time_solar_wind_data_df["propagated_time_tag"] + datetime.timedelta(minutes=10)
+
+#Sort the data by the propagated time tags, since some propagated records will 
+# appear to arrive at 32Re in the wrong time order.
+real_time_solar_wind_data_df.sort_values(by=["propagated_time_tag"], inplace=True)
+
+#Convert the pandas dataframe (non-temporal) values to numeric floats.
+#Loop over all non-temporal columns of the dataframe.
+for i_column in range(1,np.shape(real_time_solar_wind_data_df)[1]-1):
+    real_time_solar_wind_data_df.iloc[:,i_column] = \
+        pandas.to_numeric(real_time_solar_wind_data_df.iloc[:,i_column], downcast='float')
+    #End indenting for this operation.
+#End loop over all non-temporal columns of the dataframe.
+
+#Interpolate the data to a regular cadence, using median averages to set 
+# the propagated time tags to a 1-min step.
+real_time_solar_wind_data_df.set_index("propagated_time_tag", inplace=True)
+real_time_solar_wind_data_df = real_time_solar_wind_data_df.resample('1min').median()
+
+#Linearly interpolate the solar wind data to the new (propagated) 1-min cadence.
+real_time_solar_wind_data_df.interpolate(method='linear', axis=0, inplace=True)
+
+
+#Normalise the solar wind data to the mean and std values of input features from the training data (I think).
+#Load mean and std values of input features from a json file.
+inp_mean_std_file_path = os.path.join(os.getcwd(),'Storage_for_model_coefficients','amp_model_input_mean_std.json')
+
+#Load the mean and std values into memory.
+with open(inp_mean_std_file_path) as jf:
+    params_mean_std_dct = json.load(jf)
+#End indenting for this load-in.
+
+#Instantiate and normalize Vx.
+real_time_solar_wind_data_df["Vx"] = -1.*real_time_solar_wind_data_df["speed"]
+real_time_solar_wind_data_df["Vx"] = (real_time_solar_wind_data_df["Vx"] - params_mean_std_dct["Vx_mean"]) / params_mean_std_dct["Vx_std"]
+#Instantiate and normalize Np.
+real_time_solar_wind_data_df["Np"] = (real_time_solar_wind_data_df["density"] - params_mean_std_dct["Np_mean"]) / params_mean_std_dct["Np_std"]
+#Instantiate and normalize Bz.
+real_time_solar_wind_data_df["Bz"] = (real_time_solar_wind_data_df["bz"] - params_mean_std_dct["Bz_mean"]) / params_mean_std_dct["Bz_std"]
+#Instantiate and normalize By.
+real_time_solar_wind_data_df["By"] = (real_time_solar_wind_data_df["by"] - params_mean_std_dct["By_mean"]) / params_mean_std_dct["By_std"]
+#Instantiate and normalize Bx.
+real_time_solar_wind_data_df["Bx"] = (real_time_solar_wind_data_df["bx"] - params_mean_std_dct["Bx_mean"]) / params_mean_std_dct["Bx_std"]
+
+
+#Define the start and end times of the ingested data span (I think).
+omn_end_time = real_time_solar_wind_data_df.index.max()
+omn_begin_time = (omn_end_time - datetime.timedelta(minutes=omn_pred_hist)).strftime("%Y-%m-%d %H:%M:%S")
+
+#Define substorm forecast model filename.
+model_name = os.path.join(os.getcwd(),'Storage_for_model_coefficients','model_paper_weights.epoch_200.val_loss_0.49.val_acc_0.76.hdf5')
+
+#Load the substorm forecast model.
+model = keras.models.load_model(model_name)
+
+#Make the predictions.
+inp_omn_vals = real_time_solar_wind_data_df.loc[omn_begin_time : omn_end_time][omn_train_params].values
+inp_omn_vals = inp_omn_vals.reshape(1,inp_omn_vals.shape[0],inp_omn_vals.shape[1])
+sson_pred_enc = model.predict(inp_omn_vals, batch_size=1)
+sson_pred_enc = sson_pred_enc[0].round(2)
+
+#Extract the substorm onset probability from the model prediction.
+substorm_onset_probability = sson_pred_enc[1]
+
+#Make a series of this forecast value for the next hour, and NaN thereafter. 
+# Start by making a substorm probability series of the length of the forecast 
+# span.
+substorm_onset_probability_series = np.ones(np.shape(shifted_times_regular_grid)) * substorm_onset_probability
+
+#Also make a series of ones, which will be set to NaN outside of the range for
+# which the substorm probability is valid. This allows me a lazy method of 
+# plotting a series for only one hour from the current time, which will be 
+# coloured by the onset probability.
+substorm_probability_is_valid = np.ones(np.shape(shifted_times_regular_grid))
+
+#Determine the length of the forecast span: if it's more than an hour, we need 
+# to replace the values over 60 min with NaNs. Otherwise, the substorm 
+# probability value can fill the forecast span (as defined above).
+if(np.timedelta64(shifted_times_regular_grid[-1] - shifted_times_regular_grid[0],'m') / np.timedelta64(1,'m') > 60):
+    #In this case, the forecast span is more than one hour.
+    
+    #Find the index of the forecast span which is just over the one-hour-long 
+    # mark. It occurs to me that this should return 61, or something's wrong.
+    index_outside_probability_forecast_span = np.nonzero((shifted_times_regular_grid - shifted_times_regular_grid[0]) / np.timedelta64(1,'m') == 61)[0][0]
+    
+    #Set the values of the substorm onset probability forecast to be NaN 
+    # outside of the valid forecast span of one hour.
+    substorm_onset_probability_series[index_outside_probability_forecast_span:] = np.nan
+    substorm_probability_is_valid[index_outside_probability_forecast_span:] = np.nan
+#End conditional: different synthesis of substorm probability series, dependent on prediction span.
+
 #%% Format and save out the forecast data file.
 
 #Define filename for real-time geomagnetic forecast output.
@@ -516,8 +628,9 @@ for i_t in range(np.shape(model_predictions_all_stations_all_cmpnts)[0]):
     #End indenting for this string formatting.
     
     #Format the prediction string.
-    data_string = '       {data_flag:1d}       {esk_x:.2f}       {esk_y:.2f}       {esk_z:.2f}       {had_x:.2f}       {had_y:.2f}       {had_z:.2f}       {ler_x:.2f}       {ler_y:.2f}       {ler_z:.2f}'\
+    data_string = '       {data_flag:1d}       {onset_probability:.2f}       {esk_x:.2f}       {esk_y:.2f}       {esk_z:.2f}       {had_x:.2f}       {had_y:.2f}       {had_z:.2f}       {ler_x:.2f}       {ler_y:.2f}       {ler_z:.2f}'\
         .format(data_flag = model_prediction_flags[i_t,0].astype(int),\
+                onset_probability = substorm_onset_probability_series[i_t],\
                 esk_x = model_predictions_all_stations_all_cmpnts[i_t,0,0],\
                 esk_y = model_predictions_all_stations_all_cmpnts[i_t,0,1],\
                 esk_z = model_predictions_all_stations_all_cmpnts[i_t,0,2],\
@@ -573,15 +686,11 @@ for i_component in range(3):
             model_predictions_all_stations_all_cmpnts[:,i_station,i_component] - model_95pcconf_error_all_stations_all_cmpnts[:,i_station,i_component],\
             model_predictions_all_stations_all_cmpnts[:,i_station,i_component] + model_95pcconf_error_all_stations_all_cmpnts[:,i_station,i_component],\
             color='0.8')
-        axs[i_component,i_station].plot(shifted_times_regular_grid,model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='C0')
-        axs[i_component,i_station].plot(shifted_times_regular_grid,model_predictions_all_stations_all_cmpnts[:,i_station,i_component] + model_95pcconf_error_all_stations_all_cmpnts[:,i_station,i_component],'--',color='C0')
-        axs[i_component,i_station].plot(shifted_times_regular_grid,model_predictions_all_stations_all_cmpnts[:,i_station,i_component] - model_95pcconf_error_all_stations_all_cmpnts[:,i_station,i_component],'--',color='C0')
+        axs[i_component,i_station].plot(shifted_times_regular_grid,model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='k')
+        axs[i_component,i_station].plot(shifted_times_regular_grid,model_predictions_all_stations_all_cmpnts[:,i_station,i_component]*substorm_probability_is_valid,color=matplotlib.cm.cool(substorm_onset_probability))
+        
         #Set x tick labels.
         axs[i_component,i_station].xaxis.set_major_locator(matplotlib.dates.MinuteLocator(interval=20))
-        #ticks = []
-        #for i_t in range(0,len(shifted_times_regular_grid),20):
-        #    ticks.append(shifted_times_regular_grid[i_t])
-        #axs[i_component,i_station].set_xticks(ticks)
         axs[i_component,i_station].xaxis.set_major_formatter(date_format)
         
         #Draw on vertical line at current date.
@@ -593,10 +702,13 @@ for i_component in range(3):
         if(i_station == 0):
             axs[i_component,i_station].set_ylabel(component_names[i_component] + '-component forecast (nT)')
         if(i_component == 2):
-            axs[i_component,i_station].set_xlabel('UTC, starting at current time')
+            axs[i_component,i_station].set_xlabel('UTC, from current time')
         #End conditional.
     #End loop over BGS stations.
 #End loop over components.
 
-plt.tight_layout()
+#Add on colour bar.
+fig.colorbar(matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(vmin=0,vmax=1), cmap=matplotlib.cm.cool), ax=axs.ravel().tolist(), label='Substorm onset probability in next hour = ' + '{:.2f}'.format(substorm_onset_probability))
+
+#Save figure as eps.
 plt.savefig(os.path.join(os.getcwd(),'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTF_version_' + output_version_identifier + '.eps'), format='eps')
