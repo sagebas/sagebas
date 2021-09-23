@@ -62,8 +62,8 @@ in_docker = True
 
 #Set directory variables dependent on run-environment.
 if in_docker:
-    #WORKDIR = '/root/run_environment/'     #for docker container
-    WORKDIR = os.path.join(os.sep,'root','run_environment')
+    #WORKDIR = '/run_environment/'     #for docker container
+    WORKDIR = os.path.join(os.sep,'run_environment')
 else:
     WORKDIR = os.path.join('C:' + os.sep,'Users','robore','BAS_Files','Research','Code','SAGE','GGF_realtime_forecast')
 #End conditional: tell the program whether to run in Docker or through Windows.
