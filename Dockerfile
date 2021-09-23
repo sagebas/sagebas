@@ -16,5 +16,9 @@ COPY . .
 # Install the Python packages we'll use
 RUN pip install --no-cache-dir -r ./requirements.txt
 
+# Alter permissions
+RUN chmod +x ./GGF_RTF.py
+RUN chmod +x ./hello_world.py
+
 # Run the SPIDER GGF_RTF Python script
 CMD [ "python", "./GGF_RTF.py" ]
