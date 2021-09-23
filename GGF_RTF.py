@@ -29,12 +29,12 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
  
 @author: Robert Shore: robore@bas.ac.uk
 """
-output_version_identifier = 'BRTFv1p3'#Version string, for author's reference.
+output_version_identifier = 'BRTFv1p4'#Version string, for author's reference.
 
 #%% Load packages.
 
 #Import these packages.
-import sys
+import sys 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'#suppresses tensorflow warnings.
 import json
@@ -48,7 +48,6 @@ import math
 import pickle
 import keras
 import pandas
-import glob
 import urllib.request
 
 #Set geometric constants.
@@ -56,6 +55,17 @@ import urllib.request
 rad = np.pi / 180 #scalar
 #Radians to degrees
 deg = 180 / np.pi #scalar
+
+
+#Define flag to switch between developing on Windows and running in Docker.
+in_docker = True
+
+#Set directory variables dependent on run-environment.
+if in_docker:
+    WORKDIR = '/root/'     #for docker container
+else:
+    WORKDIR = os.path.join('C:' + os.sep,'Users','robore','BAS_Files','Research','Code','SAGE','GGF_realtime_forecast')
+#End conditional: tell the program whether to run in Docker or through Windows.
 
 #%% Define the local time bins used by the model.
 
@@ -98,7 +108,7 @@ LT_bin_centroids_day_fraction = np.mean(np.append(LT_bin_starts_day_fraction,LT_
 os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])))
 
 #Define the coefficients filename: this model predicts using epsilon as a driver.
-BIRv5p5_coeffs_filename = os.path.join(os.getcwd(),'Storage_for_model_coefficients','BIRv5p5_tdmCBODSv3_reg_coefs.pkl')
+BIRv5p5_coeffs_filename = os.path.join(WORKDIR,'Storage_for_model_coefficients','BIRv5p5_tdmCBODSv3_reg_coefs.pkl')
 #Source: C:\Users\robore\BAS_Files\Research\Code\SAGE\BGS_IMF_Regression_v5p5.py.
 
 #Open the coefficients file.
@@ -114,7 +124,7 @@ with open(BIRv5p5_coeffs_filename,'rb') as f:
 
 #Define the coefficients filename: this model predicts using a 
 # plasma-velocity-free solar wind coupling function as a driver.
-VFERv2p0_coeffs_filename = os.path.join(os.getcwd(),'Storage_for_model_coefficients','VFERv2p0_tdmCBODSv3_reg_coefs.pkl')
+VFERv2p0_coeffs_filename = os.path.join(WORKDIR,'Storage_for_model_coefficients','VFERv2p0_tdmCBODSv3_reg_coefs.pkl')
 #Source: C:\Users\robore\BAS_Files\Research\Code\SAGE\Velocity_Free_Epsilon_Regression_v2p0.py.
 
 #Open the coefficients file.
@@ -210,10 +220,10 @@ shifted_times = shifted_times[indices_of_sorted_sw_data[:,0]]
 
 #Extract the solar wind data variables of interest for the entire week(ish) of 
 # sorted, irregularly-propagated measurements.
-sw_data_bx = real_time_solar_wind_data[:,4].astype(float)#np array of floats, size [minutes in previous hour (ish) by 0].
-sw_data_by = real_time_solar_wind_data[:,5].astype(float)#np array of floats, size [minutes in previous hour (ish) by 0].
-sw_data_bz = real_time_solar_wind_data[:,6].astype(float)#np array of floats, size [minutes in previous hour (ish) by 0].
-sw_data_vx = real_time_solar_wind_data[:,8].astype(float)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_bx = real_time_solar_wind_data[:,4].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_by = real_time_solar_wind_data[:,5].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_bz = real_time_solar_wind_data[:,6].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_vx = real_time_solar_wind_data[:,8].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
 
 #%% Temporally re-grid the propagated, sorted solar wind epochs to a regular 1-min cadence, for a recent subset of times.
 #Specifically, the subset spans from the now (which for the solar wind data, 
@@ -376,7 +386,7 @@ for i_t in range(np.shape(shifted_times_regular_grid)[0]):
             #Based on the decimal day-fraction of this BGS station's local time,
             # find the fiducials of the two LT bins which flank this value. 
             # Note that we are basing the model coefficient interpolation on 
-            # the LT bin centroids: it dose not amtter which LT bin the station
+            # the LT bin centroids: it dose not matter which LT bin the station
             # is actually 'within'.
             if(BGS_stations_shifted_times_regular_grid_local_time_day_fraction[i_t,i_station] < LT_bin_centroids_day_fraction[0]):
                 #Here, the BGS station is between midnight and the centroid LT
@@ -498,8 +508,7 @@ for i_t in range(np.shape(shifted_times_regular_grid)[0]):
 omn_pred_hist=120
 omn_train_params=["Bx", "By", "Bz", "Vx", "Np"]
 
-
-#Convert the real_time_solar_wind_data_list vaiable (loaded earlier) to a 
+#Convert the real_time_solar_wind_data_list variable (loaded earlier) to a 
 # pandas dataframe: use the first record (the header) to define the columns 
 # names, and set the values from the remainder of the variable.
 real_time_solar_wind_data_df = pandas.DataFrame.from_records(real_time_solar_wind_data_list[1:],columns=real_time_solar_wind_data_list[0])
@@ -534,16 +543,16 @@ real_time_solar_wind_data_df = real_time_solar_wind_data_df.resample('1min').med
 #Linearly interpolate the solar wind data to the new (propagated) 1-min cadence.
 real_time_solar_wind_data_df.interpolate(method='linear', axis=0, inplace=True)
 
-
-#Normalise the solar wind data to the mean and std values of input features from the training data (I think).
 #Load mean and std values of input features from a json file.
-inp_mean_std_file_path = os.path.join(os.getcwd(),'Storage_for_model_coefficients','amp_model_input_mean_std.json')
+inp_mean_std_file_path = os.path.join(WORKDIR,'Storage_for_model_coefficients','input_mean_std.json')
 
 #Load the mean and std values into memory.
 with open(inp_mean_std_file_path) as jf:
     params_mean_std_dct = json.load(jf)
 #End indenting for this load-in.
 
+#Normalise the solar wind data to the mean and std values of input features 
+# from the training data.
 #Instantiate and normalize Vx.
 real_time_solar_wind_data_df["Vx"] = -1.*real_time_solar_wind_data_df["speed"]
 real_time_solar_wind_data_df["Vx"] = (real_time_solar_wind_data_df["Vx"] - params_mean_std_dct["Vx_mean"]) / params_mean_std_dct["Vx_std"]
@@ -557,12 +566,14 @@ real_time_solar_wind_data_df["By"] = (real_time_solar_wind_data_df["by"] - param
 real_time_solar_wind_data_df["Bx"] = (real_time_solar_wind_data_df["bx"] - params_mean_std_dct["Bx_mean"]) / params_mean_std_dct["Bx_std"]
 
 
-#Define the start and end times of the ingested data span (I think).
+#Define the start and end times of the ingested data span, using the maximum 
+# time value of the span of dtaa as an endpoint, and a time 120 mins prior to 
+# this as the beginning time.
 omn_end_time = real_time_solar_wind_data_df.index.max()
 omn_begin_time = (omn_end_time - datetime.timedelta(minutes=omn_pred_hist)).strftime("%Y-%m-%d %H:%M:%S")
 
 #Define substorm forecast model filename.
-model_name = os.path.join(os.getcwd(),'Storage_for_model_coefficients','model_paper_weights.epoch_200.val_loss_0.49.val_acc_0.76.hdf5')
+model_name = os.path.join(WORKDIR,'Storage_for_model_coefficients','model_paper_weights.epoch_200.val_loss_0.49.val_acc_0.76.hdf5')
 
 #Load the substorm forecast model.
 model = keras.models.load_model(model_name)
@@ -606,7 +617,7 @@ if(np.timedelta64(shifted_times_regular_grid[-1] - shifted_times_regular_grid[0]
 #%% Format and save out the forecast data file.
 
 #Define filename for real-time geomagnetic forecast output.
-real_time_solar_wind_data_output_filename = os.path.join(os.getcwd(),'Temp_storage_for_output_GGF_forecast','real_time_magnetic_field_forecast_from_program_GGF_RTF_version_' + output_version_identifier + '.dat')
+real_time_solar_wind_data_output_filename = os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast','real_time_magnetic_field_forecast_from_program_GGF_RTF_version_' + output_version_identifier + '.dat')
 
 #Delete any existing data file of solar wind-based geomagnetic forecast outputs.
 if(os.path.isfile(real_time_solar_wind_data_output_filename)):
@@ -711,4 +722,4 @@ for i_component in range(3):
 fig.colorbar(matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(vmin=0,vmax=1), cmap=matplotlib.cm.cool), ax=axs.ravel().tolist(), label='Substorm onset probability in next hour = ' + '{:.2f}'.format(substorm_onset_probability))
 
 #Save figure as eps.
-plt.savefig(os.path.join(os.getcwd(),'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTF_version_' + output_version_identifier + '.eps'), format='eps')
+plt.savefig(os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTF_version_' + output_version_identifier + '.eps'), format='eps')
