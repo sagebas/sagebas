@@ -5,7 +5,7 @@
 FROM python:3.8.5
 
 # Set working directory inside the Docker build
-WORKDIR /run_environment/
+WORKDIR /root/run_environment/
 
 #Clone the github repository to the working directory in the Docker environment
 RUN git clone https://github.com/robert-m-shore/GGF_realtime_forecast .
