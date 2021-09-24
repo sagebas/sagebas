@@ -46,7 +46,8 @@ import matplotlib
 import time
 import math
 import pickle
-import keras
+#import keras
+from tensorflow import keras
 import pandas
 import urllib.request
 
@@ -221,10 +222,10 @@ shifted_times = shifted_times[indices_of_sorted_sw_data[:,0]]
 
 #Extract the solar wind data variables of interest for the entire week(ish) of 
 # sorted, irregularly-propagated measurements.
-sw_data_bx = real_time_solar_wind_data[:,4].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
-sw_data_by = real_time_solar_wind_data[:,5].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
-sw_data_bz = real_time_solar_wind_data[:,6].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
-sw_data_vx = real_time_solar_wind_data[:,8].astype(np.float)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_bx = real_time_solar_wind_data[:,4].astype(np.float64)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_by = real_time_solar_wind_data[:,5].astype(np.float64)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_bz = real_time_solar_wind_data[:,6].astype(np.float64)#np array of floats, size [minutes in previous hour (ish) by 0].
+sw_data_vx = real_time_solar_wind_data[:,8].astype(np.float64)#np array of floats, size [minutes in previous hour (ish) by 0].
 
 #%% Temporally re-grid the propagated, sorted solar wind epochs to a regular 1-min cadence, for a recent subset of times.
 #Specifically, the subset spans from the now (which for the solar wind data, 
