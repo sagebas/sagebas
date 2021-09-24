@@ -64,6 +64,7 @@ numpy==1.20.1
 numpydoc
 opt-einsum==3.3.0
 packaging
+pandas
 pandocfilters
 paramiko
 parso==0.7.0
