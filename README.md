@@ -28,4 +28,10 @@ The program GGF_RTF.py makes a real-time forecast of the external magnetic field
  -- Don't compute dB/dt when there is a flag change.
  -- GGF baselines are preliminary values, and will change.
  
+ The Dockerfile can be run using the following commands:
+docker builder prune -a (to remove previous cloned github repositories and make room for newer ones)
+docker build -f [on the local machine, the directory and filename of the Dockerfile you sourced from the SPIDER github repo] -t ggf_image . (to build the image)
+docker run --name ggf_container ggf_image GGF_RTF.py (to run the Python script ‘GGF_RTF.py’ from the image in a container)
+docker cp ggf_container:/root/run_environment/Temp_storage_for_output_GGF_forecast/ [on the local machine, the directory where you wish the output of the Python script to be copied to] (this copies the output forecast from a location in the Docker container to somewhere else on the local machine)
+
 @author: Robert Shore: robore@bas.ac.uk
