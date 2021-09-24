@@ -20,5 +20,10 @@ RUN pip install --no-cache-dir -r ./requirements.txt
 RUN chmod +x ./GGF_RTF.py
 RUN chmod +x ./hello_world.py
 
+ENTRYPOINT [ "python3" ]
+
 # Run the SPIDER GGF_RTF Python script
-CMD [ "python", "./GGF_RTF.py" ]
+# CMD [ "python", "./GGF_RTF.py" ]
+# ENTRYPOINT [ "python3" ]
+# CMD [ "./hello_world.py" ]
+# CMD [ "./GGF_RTF.py" ]
