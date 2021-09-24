@@ -63,7 +63,6 @@ in_docker = True
 
 #Set directory variables dependent on run-environment.
 if in_docker:
-    #WORKDIR = '/root/run_environment/'     #for docker container
     WORKDIR = os.path.join(os.sep,'root','run_environment')
 else:
     WORKDIR = os.path.join('C:' + os.sep,'Users','robore','BAS_Files','Research','Code','SAGE','GGF_realtime_forecast')
@@ -725,3 +724,7 @@ fig.colorbar(matplotlib.cm.ScalarMappable(norm=matplotlib.colors.Normalize(vmin=
 
 #Save figure as eps.
 plt.savefig(os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTF_version_' + output_version_identifier + '.eps'), format='eps')
+
+#%%% State program status.
+
+print('GGF_RTF.py run successfully completed.')

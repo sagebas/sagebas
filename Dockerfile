@@ -20,10 +20,5 @@ RUN pip install --no-cache-dir -r ./requirements.txt
 RUN chmod +x ./GGF_RTF.py
 RUN chmod +x ./hello_world.py
 
+# I believe this updates $PATH to include /usr/bin/python3, which is required before running Python scripts
 ENTRYPOINT [ "python3" ]
-
-# Run the SPIDER GGF_RTF Python script
-# CMD [ "python", "./GGF_RTF.py" ]
-# ENTRYPOINT [ "python3" ]
-# CMD [ "./hello_world.py" ]
-# CMD [ "./GGF_RTF.py" ]
