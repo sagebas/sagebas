@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Makes a real-time forecast of the external magnetic field perturbation (i.e. 
- excluding the internal field contribution) at the three British Geological 
- Survey magnetometer stations: Eskdalemuir, Hartland and Lerwick.
+Makes a real-time forecast and 24-hour hindcast of the external magnetic field 
+ perturbation (i.e. excluding the internal field contribution) at the three 
+ British Geological Survey magnetometer stations: Eskdalemuir, Hartland and 
+ Lerwick.
  
  Output file column format is as follows.
   Day-Month-Year  Hour:Minute  [Model Type Flag]  Substorm onset probability  
@@ -18,7 +19,7 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
   components, 'mean' is the mean value of the 100 model ensemble at a given 
   epoch, and likewise for 'max' and 'min'.
  The substorm onset probability defines the onset likelihood (from 0 to 1, 
-  with 1 the most likely), for the hour following the model run time. Hence, 
+  with 1 the most likely), for the hour after the model run time. Hence, 
   the onset forecast is only valid for that hour: the output file has nan 
   values for onset probabilities at forecast epochs greater than [current time
   + 60 mins].
@@ -34,7 +35,7 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
  
 @author: Robert Shore: robore@bas.ac.uk
 """
-output_version_identifier = 'BRTFv2p1'#Version string, for author's reference.
+output_version_identifier = 'BRTFHv2p1'#Version string, for author's reference.
 
 #%% Load packages.
 
@@ -45,6 +46,9 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'#suppresses tensorflow warnings.
 import json
 import numpy as np
 import datetime
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.gridspec import GridSpec
 import time
 import math
 import pickle
@@ -91,6 +95,7 @@ while (date_x + datetime.timedelta(minutes=LT_bin_cadence)) < datetime.datetime(
     date_x += datetime.timedelta(minutes=LT_bin_cadence)
     LT_bin_centroids_datetime.append(date_x)#appends time in datetime format.
 #End iteration over LT bin definitions within a sample day.
+
 
 #Now define the edges of the bins by stepping out (both forward and backward 
 # in time) from each bin's centroid. No seconds variable, because the spans 
@@ -163,17 +168,10 @@ else:
 #Define Met Office API common url path.
 MO_API_url_base_path = 'https://gateway.api-management.metoffice.cloud/swx_swimmr_n4/1.0/'
 
-#How many minutes into the past to extract data for. T
-#In the GGF model, the span extracted here must cover at least the maximum 
-# propagation time from L1 to the bow shock nose, plus the model lags, which 
-# are presently 20 mins max.
-#In the substorm model, the extracted data 120 mins into the past from whatever
-# (future) time point results from the maximum propagation time from L1 to the 
-# bow shock nose, plus 10 mins. This extraction is based on regridded data 
-# (post-propagation), so there may be issues if we don't have a bit of a 
-# time-buffer.
-#If we extract 180 mins into the past from the current time, it should always work.
-minutes_ago = 180
+#How many minutes into the past to extract data for. We need one day, and a bit
+# extra to account for propagation to bow shock nose (depends on solar wind 
+# speed), lags (20 mins), and substorm data ingestion (120 mins).
+minutes_ago = 1800
 
 #Convert the start-time of the extraction period to a formatted string.
 start_time_string = (current_time.astype(datetime.datetime) - dt.timedelta(minutes=minutes_ago)).strftime('%Y-%m-%dT%H:%M:%S')
@@ -227,6 +225,71 @@ MO_API_plasma_data_df = pd.DataFrame([{\
          } for x in MO_API_plasma_data_json])#size [minutes in past day (ish) by 5 columns].
 #End indenting.
 
+# ----------------------- Import Met Office API BGS magnetometer data.
+#Here we import the ground-based, external-only BGS magnetometer data for the 
+# same timespan as the RTSW mag and plasma data -- do not expect perfect 
+# temporal correspondence with these.
+
+# ---------- For Hartland station.
+
+#Define specific Met Office API url path.
+MO_API_BGS_had_url_path = MO_API_url_base_path + 'v1/data/external_rolling_magnetometer' + '?from=' + start_time_string + '&type=HARTLAND'
+
+#Access the API.
+MO_API_BGS_had_response = requests.get(MO_API_BGS_had_url_path, headers={"apikey": MO_API_key, "accept": "application/json"})
+
+#Convert to list of json-format data, extract only 'data', ignoring pagination.
+MO_API_BGS_had_data_json = MO_API_BGS_had_response.json()['data']
+
+#Extract data.
+MO_API_BGS_had_data_df = pd.DataFrame([{\
+         'timestamp': x['timestamp'],\
+         'x': x['Bx'],\
+         'y': x['By'],\
+         'z': x['Bz']\
+         } for x in MO_API_BGS_had_data_json])#size [minutes in past day (ish) by 4 columns].
+#End indenting.
+
+# ---------- For Eskdalemuir station.
+
+#Define specific Met Office API url path.
+MO_API_BGS_esk_url_path = MO_API_url_base_path + 'v1/data/external_rolling_magnetometer' + '?from=' + start_time_string + '&type=ESKDALEMUIR'
+
+#Access the API.
+MO_API_BGS_esk_response = requests.get(MO_API_BGS_esk_url_path, headers={"apikey": MO_API_key, "accept": "application/json"})
+
+#Convert to list of json-format data, extract only 'data', ignoring pagination.
+MO_API_BGS_esk_data_json = MO_API_BGS_esk_response.json()['data']
+
+#Extract data.
+MO_API_BGS_esk_data_df = pd.DataFrame([{\
+         'timestamp': x['timestamp'],\
+         'x': x['Bx'],\
+         'y': x['By'],\
+         'z': x['Bz']\
+         } for x in MO_API_BGS_esk_data_json])#size [minutes in past day (ish) by 4 columns].
+#End indenting.
+
+# ---------- For Lerwick station.
+
+#Define specific Met Office API url path.
+MO_API_BGS_ler_url_path = MO_API_url_base_path + 'v1/data/external_rolling_magnetometer' + '?from=' + start_time_string + '&type=LERWICK'
+
+#Access the API.
+MO_API_BGS_ler_response = requests.get(MO_API_BGS_ler_url_path, headers={"apikey": MO_API_key, "accept": "application/json"})
+
+#Convert to list of json-format data, extract only 'data', ignoring pagination.
+MO_API_BGS_ler_data_json = MO_API_BGS_ler_response.json()['data']
+
+#Extract data.
+MO_API_BGS_ler_data_df = pd.DataFrame([{\
+         'timestamp': x['timestamp'],\
+         'x': x['Bx'],\
+         'y': x['By'],\
+         'z': x['Bz']\
+         } for x in MO_API_BGS_ler_data_json])#size [minutes in past day (ish) by 4 columns].
+#End indenting.
+
 # ----------------------- Post-processing, for all Met Office API dataframes.
 
 #Remove non-active satellite measurements from each dataframe to obtain a continuous data record.
@@ -254,6 +317,21 @@ MO_API_IMF_By = np.array(MO_API_mag_data_df['by_gsm'])#size [minutes in past day
 MO_API_IMF_Bz = np.array(MO_API_mag_data_df['bz_gsm'])#size [minutes in past day (ish) by 0].
 MO_API_sw_speed = np.array(MO_API_plasma_data_df['proton_speed'])#size [minutes in past day (ish) by 0].
 MO_API_sw_density = np.array(MO_API_plasma_data_df['proton_density'])#size [minutes in past day (ish) by 0].
+
+#Extract time values from the Met Office API dataframes of the BGS data, and 
+# set them to np.datetime64 format.
+MO_API_esk_times_datetime64 = np.empty([len(MO_API_BGS_esk_data_df)],dtype='datetime64[s]')#size [minutes in past day (ish) by 0].
+for i_t in range(len(MO_API_BGS_esk_data_df)):
+    MO_API_esk_times_datetime64[i_t] = np.datetime64(MO_API_BGS_esk_data_df['timestamp'][i_t])
+#End loop over times.
+MO_API_had_times_datetime64 = np.empty([len(MO_API_BGS_had_data_df)],dtype='datetime64[s]')#size [minutes in past day (ish) by 0].
+for i_t in range(len(MO_API_BGS_had_data_df)):
+    MO_API_had_times_datetime64[i_t] = np.datetime64(MO_API_BGS_had_data_df['timestamp'][i_t])
+#End loop over times.
+MO_API_ler_times_datetime64 = np.empty([len(MO_API_BGS_ler_data_df)],dtype='datetime64[s]')#size [minutes in past day (ish) by 0].
+for i_t in range(len(MO_API_BGS_ler_data_df)):
+    MO_API_ler_times_datetime64[i_t] = np.datetime64(MO_API_BGS_ler_data_df['timestamp'][i_t])
+#End loop over times.
 
 #%% Force temporal equivalence in Met Office RTSW API data.
 
@@ -412,7 +490,7 @@ GGF_times = MO_API_plasma_times_bow_shock_nose_lagged[indices_of_sorted_lagged_s
 
 #Make a starting time for the temporal re-gridding based on the current time, 
 # reduced to 1-min precision.
-start_time = np.datetime64(current_time,'m')#scalar datetime64 object, at minute precision.
+start_time = np.datetime64(current_time,'m') - np.timedelta64(1440,'m')#scalar datetime64 object, at minute precision.
 #For instance: current_time.astype(datetime.datetime).second > start_time.astype(datetime.datetime).second.
 
 #Make an end time for the temporal re-gridding based on the last available 
@@ -650,10 +728,16 @@ substorm_forecast_data_df_part1 = pd.DataFrame(MO_API_plasma_times_bow_shock_nos
 substorm_forecast_data_df_part2 = pd.DataFrame(np.concatenate((MO_API_IMF_Bx[:,np.newaxis],MO_API_IMF_By[:,np.newaxis],\
     MO_API_IMF_Bz[:,np.newaxis],MO_API_sw_speed[:,np.newaxis],MO_API_sw_density[:,np.newaxis]),\
     axis=1),columns=['bx','by','bz','speed','density'])
-substorm_forecast_data_df = pd.concat([substorm_forecast_data_df_part1, substorm_forecast_data_df_part2], axis=1)#size [minutes in past day (ish) by 7 columns].
+substorm_forecast_data_df_part3 = pd.DataFrame(MO_API_plasma_times[:,np.newaxis],columns=['original_time_tag'])
+substorm_forecast_data_df = pd.concat([substorm_forecast_data_df_part1, substorm_forecast_data_df_part2, substorm_forecast_data_df_part3], axis=1)#size [minutes in past day (ish) by 7 columns].
 
 #Convert timestamps to datetime.
 substorm_forecast_data_df["propagated_time_tag"] = pd.to_datetime(substorm_forecast_data_df["propagated_time_tag"])
+substorm_forecast_data_df["original_time_tag"] = pd.to_datetime(substorm_forecast_data_df["original_time_tag"])
+
+#Convert original timestamps to ordinal, to allow for later interpolation by 
+# pandas' useless 'resample' routine.
+substorm_forecast_data_df["original_time_tag"] = substorm_forecast_data_df['original_time_tag'].apply(lambda v: v.timestamp())
 
 #Sort the data by the propagated time tags, since some propagated records will 
 # appear to arrive at the bow shock nose in the wrong time order.
@@ -691,41 +775,195 @@ model_name = os.path.join(WORKDIR,'Storage_for_model_coefficients','substorm_mod
 #Load the substorm forecast model.
 substorm_onset_model = keras.models.load_model(model_name)#tensorflow.python.keras.engine.functional.Functional object.
 
-#Define the temporal limits of the data to be ingested into the forward model. 
-# These are the end epoch of the propagated timestamps, and 2 hours prior to 
-# that epoch. the forecast ingestion span is based on propagated timestamps, 
-# and the forecast pertains to the (non-propagated) contemporaneous epoch (i.e. now).
-omn_end_time = substorm_forecast_data_df.index.max()
-omn_begin_time = (omn_end_time - datetime.timedelta(minutes=omn_pred_hist)).strftime("%Y-%m-%d %H:%M:%S")
+#Loop over each data point in the data extracted from the API.
+substorm_onset_probability_predictions = np.empty([len(substorm_forecast_data_df),1])#np array of floats, size [minutes in past day (ish) by 1].
+substorm_onset_predictions_epochs = np.empty([len(substorm_forecast_data_df),1],dtype='datetime64[ns]')#np array of datetime64[ns], size [minutes in past day (ish) by 1].
+substorm_onset_predictions_epochs_ordinal = np.empty([len(substorm_forecast_data_df),1])#np array of datetime64[ns], size [minutes in past day (ish) by 1].
+for i_t in range(len(substorm_forecast_data_df)):
+    #Store the epoch that this forecast pertains to: it's the original timestamp,
+    # converted here from oridinal seconds to datetime64 (via some awful route I don't want to discuss).
+    substorm_onset_predictions_epochs[i_t] = np.datetime64(pd.Timestamp(substorm_forecast_data_df['original_time_tag'][i_t],unit='s'))
+    substorm_onset_predictions_epochs_ordinal[i_t] = substorm_forecast_data_df['original_time_tag'][i_t]
+    
+    #If there are not 200 records of solar wind data preceding this epoch's 
+    # propagated timestamp, set the forecast to nan.
+    if(i_t < 200):
+        substorm_onset_probability_predictions[i_t] = np.nan
+        continue#pertains to loop over i_t
+    else:
+        #Define the end epoch of this 2-hour span of data (for the onset 
+        # probability model to ingest) based on the current epoch, i.e. 
+        # the epoch that we are forecasting for. The associated OMNI values are 
+        # given in relation to the 10-min lagged timestamps, so we're using 
+        # those as both output and input temporal reference. Also determine the
+        # start of the data span as 2 hours prior to the end epoch.
+        omn_end_time = substorm_forecast_data_df.index[i_t]
+        omn_begin_time = (omn_end_time - datetime.timedelta(minutes=omn_pred_hist)).strftime("%Y-%m-%d %H:%M:%S")
+        
+        #Compute the substorm onset probability model prediction at this epoch.
+        inp_omn_vals = substorm_forecast_data_df.loc[omn_begin_time : omn_end_time][omn_train_params].values
+        inp_omn_vals = inp_omn_vals.reshape(1,inp_omn_vals.shape[0],inp_omn_vals.shape[1])
+        sson_pred_enc = substorm_onset_model.predict(inp_omn_vals, batch_size=1)
+        sson_pred_enc = sson_pred_enc[0].round(2)
+        
+        #Extract the substorm onset probability from the model prediction.
+        substorm_onset_probability_predictions[i_t] = sson_pred_enc[1]
+    #End conditional: skip the first 120 elements of the forecast.
+#End loop over minutes in storm.
 
-#Compute the substorm onset probability model prediction at this epoch.
-inp_omn_vals = substorm_forecast_data_df.loc[omn_begin_time : omn_end_time][omn_train_params].values
-inp_omn_vals = inp_omn_vals.reshape(1,inp_omn_vals.shape[0],inp_omn_vals.shape[1])
-sson_pred_enc = substorm_onset_model.predict(inp_omn_vals, batch_size=1)
-sson_pred_enc = sson_pred_enc[0].round(2)
+#Temporally sort the substorm forecast values.
+index_temporally_sorted_substorm_forecasts = np.argsort(substorm_onset_predictions_epochs_ordinal[:,0])
+substorm_onset_predictions_epochs = substorm_onset_predictions_epochs[index_temporally_sorted_substorm_forecasts]
+substorm_onset_probability_predictions = substorm_onset_probability_predictions[index_temporally_sorted_substorm_forecasts]
 
-#Extract the substorm onset probability from the model prediction.
-substorm_onset_probability = sson_pred_enc[1]
+#Make the substorm forecast values have the same temporal range as the GGF 
+# model forecast and hindcast.
+substorm_onset_predictions_epochs_regular_grid = np.array(GGF_times_regular_grid,copy=True)
+substorm_onset_probability_predictions_regular_grid = np.interp(substorm_onset_predictions_epochs_regular_grid.astype(float), substorm_onset_predictions_epochs[:,0].astype('datetime64[s]').astype(float), substorm_onset_probability_predictions[:,0])
 
-#Make a series of this forecast value for the next hour, and NaN thereafter. 
-# Start by making a substorm probability series of the length of the forecast 
-# span.
-substorm_onset_probability_series = np.ones(np.shape(GGF_times_regular_grid)) * substorm_onset_probability
+#Find the current time in the GGF regular gridded temporal series (now 
+# equivalent to the regular gridded substorm model temporal series).
+index_current_time_in_GGF_times_regular_grid = np.nonzero(GGF_times_regular_grid == np.datetime64(current_time,'m'))[0][0]
+
+#Force the interpolated substorm onset forecast series past the present epoch 
+# to have the last value in the pre-interpolation series, since the forecast 
+# values should all have the same value.
+substorm_onset_probability_predictions_regular_grid[index_current_time_in_GGF_times_regular_grid:] = substorm_onset_probability_predictions[-1]
 
 #Determine the length of the forecast span: if it's more than an hour, we need 
 # to replace the values over 60 min with NaNs. Otherwise, the substorm 
-# probability value can fill the GGF forecast span (as defined above).
-if(np.timedelta64(GGF_times_regular_grid[-1] - GGF_times_regular_grid[0],'m') / np.timedelta64(1,'m') > 60):
+# probability value can fill the GGF forecast span.
+if(np.timedelta64(GGF_times_regular_grid[-1] - GGF_times_regular_grid[index_current_time_in_GGF_times_regular_grid],'m') / np.timedelta64(1,'m') > 60):
     #In this case, the forecast span is more than one hour.
     
     #Find the index of the forecast span which is just over the one-hour-long 
     # mark. It occurs to me that this should return 61, or something's wrong.
-    index_outside_probability_forecast_span = np.nonzero((GGF_times_regular_grid - GGF_times_regular_grid[0]) / np.timedelta64(1,'m') == 61)[0][0]
+    index_outside_probability_forecast_span = np.nonzero((GGF_times_regular_grid - GGF_times_regular_grid[index_current_time_in_GGF_times_regular_grid]) / np.timedelta64(1,'m') == 61)[0][0]
     
     #Set the values of the substorm onset probability forecast to be NaN 
     # outside of the valid forecast span of one hour.
-    substorm_onset_probability_series[index_outside_probability_forecast_span:] = np.nan
+    substorm_onset_probability_predictions_regular_grid[index_outside_probability_forecast_span:] = np.nan
 #End conditional: different synthesis of substorm probability series, dependent on prediction span.
+
+#%% Plot data.
+
+#Define BGS station names and component names.
+BGS_station_names = ['Eskdalemuir','Hartland','Lerwick']
+component_names = ['x','y','z']
+
+#Initialise figure.
+plt.style.use('seaborn-whitegrid')
+fig=plt.figure(figsize=[12,14])
+gs=GridSpec(7,3)#4 rows, 3 columns
+ax1=fig.add_subplot(gs[0:2,0])#First row, first column
+ax2=fig.add_subplot(gs[0:2,1])#First row, second column
+ax3=fig.add_subplot(gs[0:2,2])#First row, third column
+ax4=fig.add_subplot(gs[2:4,0])
+ax5=fig.add_subplot(gs[2:4,1])
+ax6=fig.add_subplot(gs[2:4,2])
+ax7=fig.add_subplot(gs[4:6,0])
+ax8=fig.add_subplot(gs[4:6,1])
+ax9=fig.add_subplot(gs[4:6,2])
+ax10=fig.add_subplot(gs[6,:])#Fourth row, span all columns
+axes = [ax1,ax2,ax3,ax4,ax5,ax6,ax7,ax8,ax9,ax10]
+
+#Define the y-axis range for all axes.
+plot_limit_max = max(np.ravel(model_predictions_all_stations_all_cmpnts_all_ensemble))
+plot_limit_max = plot_limit_max + (plot_limit_max / 10)
+plot_limit_min = min(np.ravel(model_predictions_all_stations_all_cmpnts_all_ensemble))
+plot_limit_min = plot_limit_min + (plot_limit_min / 10)
+#Define a minimum dynamic range for the y-axis.
+if(plot_limit_max < 500):
+    plot_limit_max = 500
+#End: conditional: set minimum plot range value.
+if(plot_limit_min > -500):
+    plot_limit_min = -500
+#End: conditional: set minimum plot range value.
+
+#Set the y-axis range for all axes.
+plt.setp(axes[0:9], xlim=(current_time-np.timedelta64(24,'h'),current_time+np.timedelta64(1,'h')), ylim=(plot_limit_min,plot_limit_max))
+plt.setp(axes[9], xlim=(current_time-np.timedelta64(24,'h'),current_time+np.timedelta64(1,'h')), ylim=(0,1))
+
+#Format the date string for the axis label.
+date_string = '{i_t_year}-{i_t_month:02d}-{i_t_day:02d}, {i_t_hour:02d}:{i_t_min:02d}'\
+    .format(i_t_day = current_time.astype(datetime.datetime).day,\
+            i_t_month = current_time.astype(datetime.datetime).month,\
+            i_t_year = current_time.astype(datetime.datetime).year,\
+            i_t_hour = current_time.astype(datetime.datetime).hour,\
+            i_t_min = current_time.astype(datetime.datetime).minute)
+#End indenting for this string definition.
+
+#Loop over BGS data components (order: x, y, z).
+for i_component in range(3):
+    #Loop over BGS stations.
+    for i_station in range(3):
+        #Ravel indices of station and component to get linear axis fiducial.
+        axis_number = np.ravel_multi_index([i_component,i_station], [3,3], order='C')
+        
+        #Plot ensemble mean, and max/min range.
+        axes[axis_number].fill_between(GGF_times_regular_grid[:],\
+            max_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],\
+            min_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],\
+            color='0.8')
+        axes[axis_number].plot(GGF_times_regular_grid,mean_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='0.8',label='Prediction range')
+        axes[axis_number].plot(GGF_times_regular_grid,mean_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='k',label='Model prediction')
+        
+        
+        #Plot BGS external magnetometer data.
+        if(i_station == 0):
+            axes[axis_number].plot(MO_API_esk_times_datetime64,MO_API_BGS_esk_data_df[component_names[i_component]],color='g',label='Observations')
+        elif(i_station == 1):
+            axes[axis_number].plot(MO_API_had_times_datetime64,MO_API_BGS_had_data_df[component_names[i_component]],color='g',label='Observations')
+        elif(i_station == 2):
+            axes[axis_number].plot(MO_API_ler_times_datetime64,MO_API_BGS_ler_data_df[component_names[i_component]],color='g',label='Observations')
+        #End conditional: select station-specific  BGS ground-based data to plot.
+        
+        #Set x tick labels.
+        axes[axis_number].xaxis.set_major_locator(mdates.HourLocator(interval=6))
+        axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        
+        #Show legend.
+        axes[axis_number].legend()#loc='lower left'
+        
+        #Draw on vertical line at current date.
+        index_current_time = np.nonzero(GGF_times_regular_grid == np.array(current_time, dtype='datetime64[m]'))[0][0]
+        axes[axis_number].plot([GGF_times_regular_grid[index_current_time],GGF_times_regular_grid[index_current_time]],[plot_limit_min,plot_limit_max],'k--')
+        
+        #Add titles and axis labels.
+        if(i_component == 0):
+            axes[axis_number].set_title(BGS_station_names[i_station], fontsize=15)
+        if(i_station == 0):
+            axes[axis_number].set_ylabel(component_names[i_component] + '-component forecast (nT)', fontsize=15)
+        #if(i_component == 2):
+            #End indenting for this string formatting.
+            #axes[axis_number].set_xlabel('UTC, from current time: ' + date_string)
+            
+            #Format the x-axis labels.
+            # axes[axis_number].xaxis.set_major_locator(mdates.HourLocator(interval=3))
+            # axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+            # plt.setp(axes[axis_number].get_xticklabels(), rotation=90, ha="right")
+            
+            #Alternative formatting.
+            #axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+            #fig.autofmt_xdate()
+            
+            #plt.xticks(rotation=30)
+        #End conditional.
+    #End loop over BGS stations.
+#End loop over components.
+
+#Plot substorm forecast.
+#index_current_time = np.nonzero(substorm_onset_predictions_epochs == np.array(current_time, dtype='datetime64[m]'))[0][0]
+axes[9].plot([current_time,current_time],[0,1],'k--')
+axes[9].plot(substorm_onset_predictions_epochs_regular_grid,substorm_onset_probability_predictions_regular_grid,color='k',label='Substorm onset likelihood')
+axes[9].set_xlabel('UTC, past 24 hours from current time: ' + date_string, fontsize=15)
+axes[9].xaxis.set_major_locator(mdates.HourLocator(interval=3))
+axes[9].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+axes[9].legend()
+plt.xticks(rotation=0)
+
+#Save figure as eps.
+plt.savefig(os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTF_version_' + output_version_identifier + '.eps'), format='eps')
 
 #%% Format and save out the forecast data file.
 
@@ -763,7 +1001,7 @@ for i_t in range(np.shape(mean_model_predictions_all_stations_all_cmpnts)[0]):
         '{had_x_max:.2f}       {had_y_max:.2f}       {had_z_max:.2f}       ' + \
         '{ler_x_max:.2f}       {ler_y_max:.2f}       {ler_z_max:.2f}'
     data_string = data_string.format(data_flag = model_prediction_flags[i_t,0].astype(int),\
-                onset_probability = substorm_onset_probability_series[i_t],\
+                onset_probability = substorm_onset_probability_predictions_regular_grid[i_t],\
                 esk_x = mean_model_predictions_all_stations_all_cmpnts[i_t,0,0],\
                 esk_y = mean_model_predictions_all_stations_all_cmpnts[i_t,0,1],\
                 esk_z = mean_model_predictions_all_stations_all_cmpnts[i_t,0,2],\
@@ -812,4 +1050,4 @@ file_id.close()
 
 #%% State program status.
 
-print('GGF_RTF.py run successfully completed.')
+print('GGF_RTFH.py run successfully completed.')
