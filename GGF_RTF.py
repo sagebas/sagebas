@@ -5,7 +5,7 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
  Survey magnetometer stations: Eskdalemuir, Hartland and Lerwick.
  
  Output file column format is as follows.
-  Day-Month-Year    Hour:Minute    [Model Type Flag]    Substorm onset probability    Esk x    Esk y    Esk z    Had x    Had y    Had z    Ler x    Ler y    Ler z
+  Day-Month-Year  Hour:Minute  [Model Type Flag]  Substorm onset probability  Esk x  Esk y  Esk z  Had x  Had y  Had z  Ler x  Ler y  Ler z
 
  Where: 
  'Esk' is the observatory Eskdalemuir, 'Har' is Hartland, 'Ler' is 
