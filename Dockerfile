@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r ./requirements.txt
 
 # Alter permissions
 RUN chmod +x ./GGF_RTF.py
+RUN chmod +x ./GGF_RTFH.py
 RUN chmod +x ./hello_world.py
 
 # I believe this updates $PATH to include /usr/bin/python3, which is required before running Python scripts
