@@ -34,7 +34,7 @@ Makes a real-time forecast of the external magnetic field perturbation (i.e.
  
 @author: Robert Shore: robore@bas.ac.uk
 """
-output_version_identifier = 'BRTFv2p1'#Version string, for author's reference.
+output_version_identifier = 'BRTFv2p2'#Version string, for author's reference.
 
 #%% Load packages.
 
@@ -156,7 +156,7 @@ else:
     current_time = np.datetime64(dt.datetime.now())#scalar datetime64 object.
 #End conditional: check if daylight savings time applies.
 
-#%% Load in Met Office API data for the past 24 hours.
+#%% Load in Met Office API data.
 
 # ----------------------- Import Met Office API mag data.
 
@@ -233,19 +233,13 @@ MO_API_plasma_data_df = pd.DataFrame([{\
 MO_API_mag_data_df = MO_API_mag_data_df.drop(MO_API_mag_data_df[MO_API_mag_data_df['active'] == False].index)
 MO_API_plasma_data_df = MO_API_plasma_data_df.drop(MO_API_plasma_data_df[MO_API_plasma_data_df['active'] == False].index)
 
-#Set timestamps as indices. This was not done previously as it interfered with 
-# the removal of the non-active satellite records, which had the same epochs 
-# as the active satellite records.
-MO_API_mag_data_df.set_index("timestamp", inplace=True)
-MO_API_plasma_data_df.set_index("timestamp", inplace=True)
-
 #Replace MO API dataframe 'None' values with 'nan' values.
 MO_API_mag_data_df.fillna(value=np.nan, inplace=True)
 MO_API_plasma_data_df.fillna(value=np.nan, inplace=True)
 
 #Define variables of Met Office API timestamps.
-MO_API_mag_times = np.array(MO_API_mag_data_df.index).astype('datetime64[s]')#size [minutes in past day (ish) by 0].
-MO_API_plasma_times = np.array(MO_API_plasma_data_df.index).astype('datetime64[s]')#size [minutes in past day (ish) by 0].
+MO_API_mag_times = np.array(MO_API_mag_data_df['timestamp']).astype('datetime64[s]')#size [minutes in past day (ish) by 0].
+MO_API_plasma_times = np.array(MO_API_plasma_data_df['timestamp']).astype('datetime64[s]')#size [minutes in past day (ish) by 0].
 
 #Convert the Met Office API solar wind variables that will need additional 
 # processing to numpy arrays.
@@ -254,6 +248,68 @@ MO_API_IMF_By = np.array(MO_API_mag_data_df['by_gsm'])#size [minutes in past day
 MO_API_IMF_Bz = np.array(MO_API_mag_data_df['bz_gsm'])#size [minutes in past day (ish) by 0].
 MO_API_sw_speed = np.array(MO_API_plasma_data_df['proton_speed'])#size [minutes in past day (ish) by 0].
 MO_API_sw_density = np.array(MO_API_plasma_data_df['proton_density'])#size [minutes in past day (ish) by 0].
+
+
+#Remove duplicate instances in the solar wind API data where multiple 
+# satellites are tagged as 'active' for the same timestamp. At this point in 
+# the code, there may be differences between the mag and plasma API dataframe 
+# lengths, but they should not contain duplicate temporal entries unless there
+# is more than one active satellite at the same time. So, we check for temporal 
+# duplicates.
+# ---- For the plasma API data.
+index_of_duplicate_MO_API_plasma_times = []
+for i_t in range(len(MO_API_plasma_times)):
+    #Define an index of where this time exists in the full set of times.
+    index_same_time = np.nonzero(MO_API_plasma_times == MO_API_plasma_times[i_t])[0]#np array of ints, size [duplicate dates by 0]
+    
+    #If there's more than two duplicate elements, then the code below will not 
+    # work, so flag that occurrence.
+    if(len(index_same_time) > 2):
+        print('Multiple duplicate entries in MO_API_plasma_times.')
+    #End conditional: data check.
+    
+    #If there's more than one of this time, flag the non-DSCOVR time(s) for later removal.
+    if(len(index_same_time) > 1):
+        index_DSCOVR_element_mask = np.flatnonzero(MO_API_plasma_data_df['source'].iloc[index_same_time] != 'DSCOVR')
+        index_of_duplicate_MO_API_plasma_times = np.append(index_of_duplicate_MO_API_plasma_times,index_same_time[index_DSCOVR_element_mask])
+    #End conditional.
+#End loop over times.
+
+# ---- For the mag API data.
+index_of_duplicate_MO_API_mag_times = []
+for i_t in range(len(MO_API_mag_times)):
+    #Define an index of where this time exists in the full set of times.
+    index_same_time = np.nonzero(MO_API_mag_times == MO_API_mag_times[i_t])[0]#np array of ints, size [duplicate dates by 0].
+    
+    #If there's more than two duplicate elements, then the code below will not 
+    # work, so flag that occurrence.
+    if(len(index_same_time) > 2):
+        print('Multiple duplicate entries in MO_API_mag_times.')
+    #End conditional: data check.
+    
+    #If there's more than one of this time, flag the non-DSCOVR time(s) for later removal.
+    if(len(index_same_time) > 1):
+        index_DSCOVR_element_mask = np.flatnonzero(MO_API_mag_data_df['source'].iloc[index_same_time] != 'DSCOVR')
+        index_of_duplicate_MO_API_mag_times = np.append(index_of_duplicate_MO_API_mag_times,index_same_time[index_DSCOVR_element_mask])
+    #End conditional.
+#End loop over times.
+
+#Retrieve just the unique indices of the duplicate epochs. This is required 
+# since the progression through the entire set of times will, by definition, 
+# count each duplicate twice.
+index_of_MO_API_plasma_times_to_remove = np.transpose(np.unique(index_of_duplicate_MO_API_plasma_times)[np.newaxis].astype(np.int64))[:,0]
+index_of_MO_API_mag_times_to_remove = np.transpose(np.unique(index_of_duplicate_MO_API_mag_times)[np.newaxis].astype(np.int64))[:,0]
+
+#Remove the flagged duplicates.
+MO_API_mag_data_df.drop(MO_API_mag_data_df.index[index_of_MO_API_mag_times_to_remove],inplace=True)
+MO_API_mag_times = np.delete(MO_API_mag_times,index_of_MO_API_mag_times_to_remove)
+MO_API_IMF_Bx = np.delete(MO_API_IMF_Bx,index_of_MO_API_mag_times_to_remove)
+MO_API_IMF_By = np.delete(MO_API_IMF_By,index_of_MO_API_mag_times_to_remove)
+MO_API_IMF_Bz = np.delete(MO_API_IMF_Bz,index_of_MO_API_mag_times_to_remove)
+MO_API_plasma_data_df.drop(MO_API_plasma_data_df.index[index_of_MO_API_plasma_times_to_remove],inplace=True)
+MO_API_plasma_times = np.delete(MO_API_plasma_times,index_of_MO_API_plasma_times_to_remove)
+MO_API_sw_speed = np.delete(MO_API_sw_speed,index_of_MO_API_plasma_times_to_remove)
+MO_API_sw_density = np.delete(MO_API_sw_density,index_of_MO_API_plasma_times_to_remove)
 
 #%% Force temporal equivalence in Met Office RTSW API data.
 
@@ -268,7 +324,7 @@ for i_t in range(len(MO_API_mag_times)):
         index_MO_API_mag_data_to_remove.append(i_t)
     #End conditional: if this MO mag API time has no match in the entire MO plasma API temporal dataset, then flag it for removal.
 #End loop over Met Office temporal data.
-MO_API_mag_data_df.drop(index=MO_API_mag_data_df.index[index_MO_API_mag_data_to_remove],inplace=True)
+MO_API_mag_data_df.drop(MO_API_mag_data_df.index[index_MO_API_mag_data_to_remove],inplace=True)
 MO_API_mag_times = np.delete(MO_API_mag_times,index_MO_API_mag_data_to_remove)
 MO_API_IMF_Bx = np.delete(MO_API_IMF_Bx,index_MO_API_mag_data_to_remove)
 MO_API_IMF_By = np.delete(MO_API_IMF_By,index_MO_API_mag_data_to_remove)
@@ -282,7 +338,7 @@ for i_t in range(len(MO_API_plasma_times)):
         index_MO_API_plasma_data_to_remove.append(i_t)
     #End conditional: if this MO plasma API time has no match in the entire MO mag API temporal dataset, then flag it for removal.
 #End loop over Met Office temporal data.
-MO_API_plasma_data_df.drop(index=MO_API_plasma_data_df.index[index_MO_API_plasma_data_to_remove],inplace=True)
+MO_API_plasma_data_df.drop(MO_API_plasma_data_df.index[index_MO_API_plasma_data_to_remove],inplace=True)
 MO_API_plasma_times = np.delete(MO_API_plasma_times,index_MO_API_plasma_data_to_remove)
 MO_API_sw_speed = np.delete(MO_API_sw_speed,index_MO_API_plasma_data_to_remove)
 MO_API_sw_density = np.delete(MO_API_sw_density,index_MO_API_plasma_data_to_remove)
