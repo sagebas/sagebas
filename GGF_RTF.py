@@ -271,6 +271,14 @@ for i_t in range(len(MO_API_plasma_times)):
     #If there's more than one of this time, flag the non-DSCOVR time(s) for later removal.
     if(len(index_same_time) > 1):
         index_DSCOVR_element_mask = np.flatnonzero(MO_API_plasma_data_df['source'].iloc[index_same_time] != 'DSCOVR')
+        
+        #If there's no non-DSCOVR satellite, then it's a duplication of the 
+        # temporal record, rather than an instance of both satellites being 
+        # 'active', so we just take the first of the duplicates in that case.
+        if(len(index_DSCOVR_element_mask) == 0):
+            index_DSCOVR_element_mask = 0
+        #End conditional: data check.
+        
         index_of_duplicate_MO_API_plasma_times = np.append(index_of_duplicate_MO_API_plasma_times,index_same_time[index_DSCOVR_element_mask])
     #End conditional.
 #End loop over times.
@@ -290,6 +298,14 @@ for i_t in range(len(MO_API_mag_times)):
     #If there's more than one of this time, flag the non-DSCOVR time(s) for later removal.
     if(len(index_same_time) > 1):
         index_DSCOVR_element_mask = np.flatnonzero(MO_API_mag_data_df['source'].iloc[index_same_time] != 'DSCOVR')
+        
+        #If there's no non-DSCOVR satellite, then it's a duplication of the 
+        # temporal record, rather than an instance of both satellites being 
+        # 'active', so we just take the first of the duplicates in that case.
+        if(len(index_DSCOVR_element_mask) == 0):
+            index_DSCOVR_element_mask = 0
+        #End conditional: data check.
+        
         index_of_duplicate_MO_API_mag_times = np.append(index_of_duplicate_MO_API_mag_times,index_same_time[index_DSCOVR_element_mask])
     #End conditional.
 #End loop over times.
