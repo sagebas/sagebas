@@ -503,10 +503,10 @@ GGF_times_regular_grid = np.arange(start_time,end_time+np.timedelta64(1,'m'),np.
 #Interpolate the various solar wind measurement values to the regular temporal 
 # grid, using the command '.astype(float)' to convert the datetime64 values to 
 # ordinal microseconds.
-GGF_IMF_Bx_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_IMF_Bx)#size [minutes in past day (ish) by 0].
-GGF_IMF_By_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_IMF_By)#size [minutes in past day (ish) by 0].
-GGF_IMF_Bz_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_IMF_Bz)#size [minutes in past day (ish) by 0].
-GGF_sw_speed_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_sw_speed[:,0])#size [minutes in past day (ish) by 0].
+GGF_IMF_Bx_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_IMF_Bx),0].astype(float), GGF_IMF_Bx[~np.isnan(GGF_IMF_Bx)])#size [minutes in past day (ish) by 0].
+GGF_IMF_By_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_IMF_By),0].astype(float), GGF_IMF_By[~np.isnan(GGF_IMF_By)])#size [minutes in past day (ish) by 0].
+GGF_IMF_Bz_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_IMF_Bz),0].astype(float), GGF_IMF_Bz[~np.isnan(GGF_IMF_Bz)])#size [minutes in past day (ish) by 0].
+GGF_sw_speed_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_sw_speed[:,0]),0].astype(float), GGF_sw_speed[~np.isnan(GGF_sw_speed[:,0]),0])#size [minutes in past day (ish) by 0].
 nan_indicator_series_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), nan_indicator_series_original)#size [minutes in past day (ish) by 0].
 
 #%% Compute local times at each BGS station, from the timestamps of the most-recent solar wind measurements.

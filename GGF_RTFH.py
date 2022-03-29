@@ -581,10 +581,10 @@ GGF_times_regular_grid = np.arange(start_time,end_time+np.timedelta64(1,'m'),np.
 #Interpolate the various solar wind measurement values to the regular temporal 
 # grid, using the command '.astype(float)' to convert the datetime64 values to 
 # ordinal microseconds.
-GGF_IMF_Bx_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_IMF_Bx)#size [minutes in past day (ish) by 0].
-GGF_IMF_By_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_IMF_By)#size [minutes in past day (ish) by 0].
-GGF_IMF_Bz_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_IMF_Bz)#size [minutes in past day (ish) by 0].
-GGF_sw_speed_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), GGF_sw_speed[:,0])#size [minutes in past day (ish) by 0].
+GGF_IMF_Bx_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_IMF_Bx),0].astype(float), GGF_IMF_Bx[~np.isnan(GGF_IMF_Bx)])#size [minutes in past day (ish) by 0].
+GGF_IMF_By_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_IMF_By),0].astype(float), GGF_IMF_By[~np.isnan(GGF_IMF_By)])#size [minutes in past day (ish) by 0].
+GGF_IMF_Bz_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_IMF_Bz),0].astype(float), GGF_IMF_Bz[~np.isnan(GGF_IMF_Bz)])#size [minutes in past day (ish) by 0].
+GGF_sw_speed_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[~np.isnan(GGF_sw_speed[:,0]),0].astype(float), GGF_sw_speed[~np.isnan(GGF_sw_speed[:,0]),0])#size [minutes in past day (ish) by 0].
 nan_indicator_series_regular_grid = np.interp(GGF_times_regular_grid.astype(float), GGF_times[:,0].astype(float), nan_indicator_series_original)#size [minutes in past day (ish) by 0].
 
 #%% Compute local times at each BGS station, from the timestamps of the most-recent solar wind measurements.
@@ -893,29 +893,37 @@ substorm_onset_probability_predictions = substorm_onset_probability_predictions[
 substorm_onset_predictions_epochs_regular_grid = np.array(GGF_times_regular_grid,copy=True)
 substorm_onset_probability_predictions_regular_grid = np.interp(substorm_onset_predictions_epochs_regular_grid.astype(float), substorm_onset_predictions_epochs[:,0].astype('datetime64[s]').astype(float), substorm_onset_probability_predictions[:,0])
 
-#Find the current time in the GGF regular gridded temporal series (now 
-# equivalent to the regular gridded substorm model temporal series).
-index_current_time_in_GGF_times_regular_grid = np.nonzero(GGF_times_regular_grid == np.datetime64(current_time,'m'))[0][0]
-
-#Force the interpolated substorm onset forecast series past the present epoch 
-# to have the last value in the pre-interpolation series, since the forecast 
-# values should all have the same value.
-substorm_onset_probability_predictions_regular_grid[index_current_time_in_GGF_times_regular_grid:] = substorm_onset_probability_predictions[-1]
-
-#Determine the length of the forecast span: if it's more than an hour, we need 
-# to replace the values over 60 min with NaNs. Otherwise, the substorm 
-# probability value can fill the GGF forecast span.
-if(np.timedelta64(GGF_times_regular_grid[-1] - GGF_times_regular_grid[index_current_time_in_GGF_times_regular_grid],'m') / np.timedelta64(1,'m') > 60):
-    #In this case, the forecast span is more than one hour.
+#Data check: if the value of current_time is not within the range of the 
+# GGF_times_regular_grid values, then the find-operation of index_current_time_in_GGF_times_regular_grid
+# will fail. Here, check for the case that the extracted (propagated) data from 
+# the API does not include the present time.
+if(GGF_times_regular_grid[-1] < np.datetime64(current_time,'m')):
+    print('Warning: insufficient data extracted from API for forecast.')
+else:
+    #Find the current time in the GGF regular gridded temporal series (now 
+    # equivalent to the regular gridded substorm model temporal series).
+    index_current_time_in_GGF_times_regular_grid = np.nonzero(GGF_times_regular_grid == np.datetime64(current_time,'m'))[0][0]
     
-    #Find the index of the forecast span which is just over the one-hour-long 
-    # mark. It occurs to me that this should return 61, or something's wrong.
-    index_outside_probability_forecast_span = np.nonzero((GGF_times_regular_grid - GGF_times_regular_grid[index_current_time_in_GGF_times_regular_grid]) / np.timedelta64(1,'m') == 61)[0][0]
+    #Force the interpolated substorm onset forecast series past the present epoch 
+    # to have the last value in the pre-interpolation series, since the forecast 
+    # values should all have the same value.
+    substorm_onset_probability_predictions_regular_grid[index_current_time_in_GGF_times_regular_grid:] = substorm_onset_probability_predictions[-1]
     
-    #Set the values of the substorm onset probability forecast to be NaN 
-    # outside of the valid forecast span of one hour.
-    substorm_onset_probability_predictions_regular_grid[index_outside_probability_forecast_span:] = np.nan
-#End conditional: different synthesis of substorm probability series, dependent on prediction span.
+    #Determine the length of the forecast span: if it's more than an hour, we need 
+    # to replace the values over 60 min with NaNs. Otherwise, the substorm 
+    # probability value can fill the GGF forecast span.
+    if(np.timedelta64(GGF_times_regular_grid[-1] - GGF_times_regular_grid[index_current_time_in_GGF_times_regular_grid],'m') / np.timedelta64(1,'m') > 60):
+        #In this case, the forecast span is more than one hour.
+        
+        #Find the index of the forecast span which is just over the one-hour-long 
+        # mark. It occurs to me that this should return 61, or something's wrong.
+        index_outside_probability_forecast_span = np.nonzero((GGF_times_regular_grid - GGF_times_regular_grid[index_current_time_in_GGF_times_regular_grid]) / np.timedelta64(1,'m') == 61)[0][0]
+        
+        #Set the values of the substorm onset probability forecast to be NaN 
+        # outside of the valid forecast span of one hour.
+        substorm_onset_probability_predictions_regular_grid[index_outside_probability_forecast_span:] = np.nan
+    #End conditional: different synthesis of substorm probability series, dependent on prediction span.
+#End conditional: data check.
 
 #%% Plot data.
 
@@ -998,8 +1006,7 @@ for i_component in range(3):
         axes[axis_number].legend()#loc='lower left'
         
         #Draw on vertical line at current date.
-        index_current_time = np.nonzero(GGF_times_regular_grid == np.array(current_time, dtype='datetime64[m]'))[0][0]
-        axes[axis_number].plot([GGF_times_regular_grid[index_current_time],GGF_times_regular_grid[index_current_time]],[plot_limit_min,plot_limit_max],'k--')
+        axes[axis_number].plot([np.datetime64(current_time,'m'),np.datetime64(current_time,'m')],[plot_limit_min,plot_limit_max],'k--')
         
         #Add titles and axis labels.
         if(i_component == 0):
