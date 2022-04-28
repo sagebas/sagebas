@@ -35,7 +35,7 @@ Makes a real-time forecast and 24-hour hindcast of the external magnetic field
  
 @author: Robert Shore: robore@bas.ac.uk
 """
-output_version_identifier = 'BRTFHv2p2'#Version string, for author's reference.
+output_version_identifier = 'BRTFHv2p3'#Version string, for author's reference.
 
 #%% Load packages.
 
@@ -938,41 +938,38 @@ else:
 #%% Plot data.
 
 #Define BGS station names and component names.
-BGS_station_names = ['Eskdalemuir','Hartland','Lerwick']
-component_names = ['x','y','z']
+BGS_station_names = ['Esk','Har','Ler']
+component_names = ['x','y']
 
 #Initialise figure.
 plt.style.use('seaborn-whitegrid')
 fig=plt.figure(figsize=[12,14])
-gs=GridSpec(7,3)#4 rows, 3 columns
-ax1=fig.add_subplot(gs[0:2,0])#First row, first column
-ax2=fig.add_subplot(gs[0:2,1])#First row, second column
-ax3=fig.add_subplot(gs[0:2,2])#First row, third column
-ax4=fig.add_subplot(gs[2:4,0])
-ax5=fig.add_subplot(gs[2:4,1])
-ax6=fig.add_subplot(gs[2:4,2])
-ax7=fig.add_subplot(gs[4:6,0])
-ax8=fig.add_subplot(gs[4:6,1])
-ax9=fig.add_subplot(gs[4:6,2])
-ax10=fig.add_subplot(gs[6,:])#Fourth row, span all columns
-axes = [ax1,ax2,ax3,ax4,ax5,ax6,ax7,ax8,ax9,ax10]
+gs=GridSpec(7,1)#7 rows, 1 column
+ax1=fig.add_subplot(gs[0,0])#First row, first column
+ax2=fig.add_subplot(gs[1,0])#second row, first column
+ax3=fig.add_subplot(gs[2,0])#second row, first column
+ax4=fig.add_subplot(gs[3,0])#second row, first column
+ax5=fig.add_subplot(gs[4,0])#second row, first column
+ax6=fig.add_subplot(gs[5,0])#second row, first column
+ax7=fig.add_subplot(gs[6,0])#second row, first column
+axes = [ax1,ax2,ax3,ax4,ax5,ax6,ax7]
 
 #Define the y-axis range for all axes.
-plot_limit_max = max(np.ravel(model_predictions_all_stations_all_cmpnts_all_ensemble))
+plot_limit_max = max(np.ravel(model_predictions_all_stations_all_cmpnts_all_ensemble[:,:,0:2,:]))#selection is for: all epochs, all stations, y and y components, all ensemble models.
 plot_limit_max = plot_limit_max + (plot_limit_max / 10)
-plot_limit_min = min(np.ravel(model_predictions_all_stations_all_cmpnts_all_ensemble))
+plot_limit_min = min(np.ravel(model_predictions_all_stations_all_cmpnts_all_ensemble[:,:,0:2,:]))#selection is for: all epochs, all stations, y and y components, all ensemble models.
 plot_limit_min = plot_limit_min + (plot_limit_min / 10)
 #Define a minimum dynamic range for the y-axis.
-if(plot_limit_max < 500):
-    plot_limit_max = 500
+if(plot_limit_max < 200):
+    plot_limit_max = 200
 #End: conditional: set minimum plot range value.
-if(plot_limit_min > -500):
-    plot_limit_min = -500
+if(plot_limit_min > -200):
+    plot_limit_min = -200
 #End: conditional: set minimum plot range value.
 
 #Set the y-axis range for all axes.
-plt.setp(axes[0:9], xlim=(current_time-np.timedelta64(24,'h'),current_time+np.timedelta64(1,'h')), ylim=(plot_limit_min,plot_limit_max))
-plt.setp(axes[9], xlim=(current_time-np.timedelta64(24,'h'),current_time+np.timedelta64(1,'h')), ylim=(0,1))
+plt.setp(axes[0:6], xlim=(current_time-np.timedelta64(24,'h'),current_time+np.timedelta64(1,'h')), ylim=(plot_limit_min,plot_limit_max))
+plt.setp(axes[6], xlim=(current_time-np.timedelta64(24,'h'),current_time+np.timedelta64(1,'h')), ylim=(0,1))
 
 #Format the date string for the axis label.
 date_string = '{i_t_year}-{i_t_month:02d}-{i_t_day:02d}, {i_t_hour:02d}:{i_t_min:02d}'\
@@ -983,72 +980,57 @@ date_string = '{i_t_year}-{i_t_month:02d}-{i_t_day:02d}, {i_t_hour:02d}:{i_t_min
             i_t_min = current_time.astype(datetime.datetime).minute)
 #End indenting for this string definition.
 
+#Manually define order of stations and components for axes 0--5.
+i_component_order = [0,1,0,1,0,1]#alternating x,y.
+i_station_order = [2,2,0,0,1,1]#Hartland at the bottom of the plot, Lerwick at the top.
+
+
 #Loop over BGS data components (order: x, y, z).
-for i_component in range(3):
-    #Loop over BGS stations.
-    for i_station in range(3):
-        #Ravel indices of station and component to get linear axis fiducial.
-        axis_number = np.ravel_multi_index([i_component,i_station], [3,3], order='C')
-        
-        #Plot ensemble mean, and max/min range.
-        axes[axis_number].fill_between(GGF_times_regular_grid[:],\
-            max_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],\
-            min_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],\
-            color='0.8')
-        axes[axis_number].plot(GGF_times_regular_grid,mean_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='0.8',label='Prediction range')
-        axes[axis_number].plot(GGF_times_regular_grid,mean_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='k',label='Model prediction')
-        
-        
-        #Plot BGS external magnetometer data.
-        if(i_station == 0):
-            axes[axis_number].plot(MO_API_esk_times_datetime64,MO_API_BGS_esk_data_df[component_names[i_component]],color='g',label='Observations')
-        elif(i_station == 1):
-            axes[axis_number].plot(MO_API_had_times_datetime64,MO_API_BGS_had_data_df[component_names[i_component]],color='g',label='Observations')
-        elif(i_station == 2):
-            axes[axis_number].plot(MO_API_ler_times_datetime64,MO_API_BGS_ler_data_df[component_names[i_component]],color='g',label='Observations')
-        #End conditional: select station-specific  BGS ground-based data to plot.
-        
-        #Set x tick labels.
-        axes[axis_number].xaxis.set_major_locator(mdates.HourLocator(interval=6))
-        axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        
-        #Show legend.
-        axes[axis_number].legend()#loc='lower left'
-        
-        #Draw on vertical line at current date.
-        axes[axis_number].plot([np.datetime64(current_time,'m'),np.datetime64(current_time,'m')],[plot_limit_min,plot_limit_max],'k--')
-        
-        #Add titles and axis labels.
-        if(i_component == 0):
-            axes[axis_number].set_title(BGS_station_names[i_station], fontsize=15)
-        if(i_station == 0):
-            axes[axis_number].set_ylabel(component_names[i_component] + '-component forecast (nT)', fontsize=15)
-        #if(i_component == 2):
-            #End indenting for this string formatting.
-            #axes[axis_number].set_xlabel('UTC, from current time: ' + date_string)
-            
-            #Format the x-axis labels.
-            # axes[axis_number].xaxis.set_major_locator(mdates.HourLocator(interval=3))
-            # axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-            # plt.setp(axes[axis_number].get_xticklabels(), rotation=90, ha="right")
-            
-            #Alternative formatting.
-            #axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-            #fig.autofmt_xdate()
-            
-            #plt.xticks(rotation=30)
-        #End conditional.
-    #End loop over BGS stations.
-#End loop over components.
+for axis_number in range(6):
+    #Use the predefined plot order to get stationand component indices for plotting.
+    i_station = i_station_order[axis_number]
+    i_component = i_component_order[axis_number]
+    
+    #Plot ensemble mean, and max/min range.
+    axes[axis_number].fill_between(GGF_times_regular_grid[:],\
+        max_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],\
+        min_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],\
+        color='0.8')
+    axes[axis_number].plot(GGF_times_regular_grid,mean_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='0.8',label='Prediction range')
+    axes[axis_number].plot(GGF_times_regular_grid,mean_model_predictions_all_stations_all_cmpnts[:,i_station,i_component],color='k',label='Model prediction')
+    
+    
+    #Plot BGS external magnetometer data.
+    if(i_station == 0):
+        axes[axis_number].plot(MO_API_esk_times_datetime64,MO_API_BGS_esk_data_df[component_names[i_component]],color='g',label='Observations')
+    elif(i_station == 1):
+        axes[axis_number].plot(MO_API_had_times_datetime64,MO_API_BGS_had_data_df[component_names[i_component]],color='g',label='Observations')
+    elif(i_station == 2):
+        axes[axis_number].plot(MO_API_ler_times_datetime64,MO_API_BGS_ler_data_df[component_names[i_component]],color='g',label='Observations')
+    #End conditional: select station-specific  BGS ground-based data to plot.
+    
+    #Set x tick labels.
+    axes[axis_number].xaxis.set_major_locator(mdates.HourLocator(interval=3))
+    axes[axis_number].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    
+    #Show legend.
+    axes[axis_number].legend(loc='upper left')#loc='lower left'
+    
+    #Draw on vertical line at current date.
+    axes[axis_number].plot([np.datetime64(current_time,'m'),np.datetime64(current_time,'m')],[plot_limit_min,plot_limit_max],'k--')
+    
+    #Add axis labels.
+    axes[axis_number].set_ylabel(BGS_station_names[i_station] + ' ' + component_names[i_component] + ' (nT)', fontsize=15)
+#End loop over station and component plots.
 
 #Plot substorm forecast.
 #index_current_time = np.nonzero(substorm_onset_predictions_epochs == np.array(current_time, dtype='datetime64[m]'))[0][0]
-axes[9].plot([current_time,current_time],[0,1],'k--')
-axes[9].plot(substorm_onset_predictions_epochs_regular_grid,substorm_onset_probability_predictions_regular_grid,color='k',label='Substorm onset likelihood')
-axes[9].set_xlabel('UTC, past 24 hours from current time: ' + date_string, fontsize=15)
-axes[9].xaxis.set_major_locator(mdates.HourLocator(interval=3))
-axes[9].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-axes[9].legend()
+axes[6].plot([current_time,current_time],[0,1],'k--')
+axes[6].plot(substorm_onset_predictions_epochs_regular_grid,substorm_onset_probability_predictions_regular_grid,color='k',label='Substorm onset likelihood')
+axes[6].set_xlabel('UTC, past 24 hours from current time: ' + date_string, fontsize=15)
+axes[6].xaxis.set_major_locator(mdates.HourLocator(interval=3))
+axes[6].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+axes[6].legend()
 plt.xticks(rotation=0)
 
 #Save figure as eps.
