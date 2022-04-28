@@ -893,6 +893,16 @@ substorm_onset_probability_predictions = substorm_onset_probability_predictions[
 substorm_onset_predictions_epochs_regular_grid = np.array(GGF_times_regular_grid,copy=True)
 substorm_onset_probability_predictions_regular_grid = np.interp(substorm_onset_predictions_epochs_regular_grid.astype(float), substorm_onset_predictions_epochs[:,0].astype('datetime64[s]').astype(float), substorm_onset_probability_predictions[:,0])
 
+#Data check: it is possible that the GGF_times_regular_grid series will not 
+# contain the current_time value, in which case, a line of code later on will 
+# fail. Here we check for that occurrence, and if needed, activate a contingency 
+# condition whereby an ascii file of NaNs is output.
+if(not np.any(GGF_times_regular_grid == np.datetime64(current_time,'m'))):
+    print('Warning: you are seeing this message because the current epoch is not present ')
+    print('in the data from the API. The program will not produce a plot, or an ascii file.')
+    sys.exit()
+#End conditional: check whether the current time exists in the set of all gridded times.
+
 #Data check: if the value of current_time is not within the range of the 
 # GGF_times_regular_grid values, then the find-operation of index_current_time_in_GGF_times_regular_grid
 # will fail. Here, check for the case that the extracted (propagated) data from 
