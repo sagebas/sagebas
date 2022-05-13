@@ -164,22 +164,17 @@ rad = np.pi / 180 #scalar
 #Radians to degrees
 deg = 180 / np.pi #scalar
 
-
-#Define flag to switch between developing on Windows and running in Docker.
-in_docker = False
+#Define flag to switch between developing locally and running in Docker virtual environment.
+in_docker = True
 
 #Set directory variables dependent on run-environment.
 if in_docker:
     WORKDIR = os.path.join(os.sep,'root','run_environment')
 else:
-    #!!!!
-    #Windows.
     WORKDIR = os.path.join('C:' + os.sep,'Users','robore','BAS_Files','Research','Code','SAGE','SAGE_Model_Handover','Forecast')
-    
-    #!!!!
-    #bslthemesa.
-    #WORKDIR = os.path.join(os.sep,'local','users','robore','shortcut_EIMF_data','SAGE_Model_Handover','Forecast')
-#End conditional: tell the program whether to run in Docker or through Windows.
+    #Dear user: if running on a BAS machine, please edit the above string to be
+    # WORKDIR = '/data/psdcomplexity/eimf/SAGE_Model_Handover/Forecast'.
+#End conditional: tell the program whether to run in Docker or locally.
 
 #%% Define LT bins used by the model, at 180 mins width and 60 mins cadence.
 
