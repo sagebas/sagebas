@@ -1,41 +1,163 @@
 # -*- coding: utf-8 -*-
 """
-Makes a real-time forecast and 24-hour hindcast of the external magnetic field 
- perturbation (i.e. excluding the internal field contribution) at the three 
- British Geological Survey magnetometer stations: Eskdalemuir, Hartland and 
- Lerwick.
- 
- Output file column format is as follows.
-  Day-Month-Year  Hour:Minute  [Model Type Flag]  Substorm onset probability  
-  Esk x mean  Esk y mean  Esk z mean  Had x mean  Had y mean  Had z mean  
-  Ler x mean  Ler y mean  Ler z mean  Esk x min   Esk y min   Esk z min  
-  Had x min   Had y min   Had z min   Ler x min   Ler y min   Ler z min 
-  Esk x max   Esk y max   Esk z max   Had x max   Had y max   Had z max   
-  Ler x max   Ler y max   Ler z max 
+Program name: 
+ GGF_RTFH.py
 
- Where: 
- 'Esk' is the observatory Eskdalemuir, 'Har' is Hartland, 'Ler' is 
-  Lerwick, 'x','y','z' are the ground geomagnetic field perturbation 
-  components, 'mean' is the mean value of the 100 model ensemble at a given 
-  epoch, and likewise for 'max' and 'min'.
- The substorm onset probability defines the onset likelihood (from 0 to 1, 
-  with 1 the most likely), for the hour after the model run time. Hence, 
-  the onset forecast is only valid for that hour: the output file has nan 
-  values for onset probabilities at forecast epochs greater than [current time
-  + 60 mins].
- The Model Type Flag has the following meanings.
-  0: no problems: model forecast is based on the epsilon coupling function.
-  1: some parts of the solar wind data were not available for this epoch of the
-     real-time solar wind stream, so the forecast is based on interpolated 
-     values.
-  2: there were no solar wind data at this epoch, so the output is nan.
+Program objectives:
+ This program reads in regression model coefficients produced by program 
+ GGF_Training_Model.py, and real time solar wind data from a Met Office API, 
+ and produces a 24-hour ground external (i.e. excluding the internal field 
+ contribution) geomagnetic field (GGF) hindcast and (approximately one hour) 
+ forecast at the three UK magnetometer stations operated by the British 
+ Geological Survey: Eskdalemuir, Hartland and Lerwick. The prediction is given 
+ as the max, min and mean of a 100-model ensemble at each time-step, where the 
+ 100 models are obtained by training on 100 random samples of 80% of a database 
+ of geomagnetic storm periods.
 
- User notes.
- -- Don't compute dB/dt when there is a Model Type flag change between adjacent epochs.
- 
-@author: Robert Shore: robore@bas.ac.uk
+Input data requirements: 
+ - GGF_Training_Model_Dataset_of_Stored_Model_Coefficients.pkl
+    - Description: regression model coefficients relating the solar wind 
+      epsilon parameter to the ground geomagnetic variation. These are used by 
+      the ground geomagnetic prediction model in this program.
+    - Source: produced by program 'GGF_Training_Model.py'.
+    - Is it included here: yes. These data do not need to be reproduced 
+      because the file is provided in the same directory as this program.
+    - Format: a Python list containing a 5-dimensional numpy array of model 
+      coefficients. The dimensions are: [stations, local time bins, magnetic 
+      components, model parameters, randomised training data instances]. The 
+      details of each dimension is as follows.
+       - There are three stations (i.e. observatories) in the order: 
+         Eskdalemuir, Hartland, Lerwick.
+       - There are 24 local time bins, which are spaced at 1 hour intervals 
+         with a 3-hour width for each bin. The first bin has a centroid at 
+         00:30 local time, and spans the three hours from 23:00 to 02:00 local 
+         time.
+       - The three magnetic components have the order: x, y, z.
+       - There are 6 model parameters which are used to solve for an estimate 
+         of the ground geomagnetic variation (y) for a given magnetic component
+         at a given station at a given local time. The equation being solved is 
+         y = a + b*(sin(DOY)) + c*(cos(DOY)) + d*epsilon + e*(sin(DOY) * epsilon) + f*(cos(DOY) * epsilon)
+         where a is the intercept coefficient, and the other coefficients 
+         describe the effect of the following parameters: b for sine of day of 
+         year (DOY), c for cosine of DOY, d for epsilon, e for 
+         (sine of DOY)*epsilon, and f for (cosine of DOY)*epsilon.
+       - There are 100 randomised training data instances, each of which 
+         relates to a different random selection of 80% of the full set of 
+         geomagnetic storm intervals used to train the model.
+ - n4-key.txt
+    - Description: the access key for the Met Office API used to access real 
+      time solar wind data.
+    - Source: Met Office, pers. comm.
+    - Is it included here: yes.
+    - Format: ascii text file contianing the API key as a single string.
+ - substorm_model_solar_wind_weights_mean_std.json
+    - Description: a file of the mean and standard deviations of the OMNI solar
+      wind data from 1996-01-01 to 2014-12-31, for the solar wind parameters 
+      used to train the substorm onset likelihood forecast model. The same mean
+      and standard deviation information is used in this program to normalise 
+      the real-time solar wind dtaa obtained from the API, before it is used to 
+      produce the substorm onset likelihood prediction.
+    - Source: this is a JSON-formatted copy of the values in the file 
+      'omn_mean_std.npy', which is produced by program 
+      'Substorm_Training_Model.py' and is stored in the directory 
+      'Substorm/data'.
+    - Is it included here: yes. These data do not need to be reproduced 
+      because the file is provided in the same directory as this program.
+    - Format: JSON format, with 10 data rows of alternating mean and standard 
+      deviation values for the following parameters in order, where all 
+      components relate to the GSM frame: IMF Bx, IMF By, IMF Bz, solar wind 
+      x-component velocity, proton density. The magnetic components have units 
+      of nanoTesla, the velocity has units of metres per second, and the proton
+      density has units of n/cc.
+ - substorm_model_coefficient_weights.epoch_200.val_loss_0.58.val_accuracy_0.70.hdf5
+    - Description: the model coefficients used to forecast substorm onset from 
+      solar wind data, trained by a convolutional neural network model.
+    - Source: produced by program 'Substorm_Training_Model.py'. This is a 
+      renamed copy of the coefficients file in directory 
+      'Substorm/trained_model'.
+    - Is it included here: yes. These data do not need to be reproduced 
+      because the file is provided in the same directory as this program.
+    - Format: Hierarchical Data Format HDF5.
+ - Access to the Met Office API at 
+   'https://gateway.api-management.metoffice.cloud/swx_swimmr_n4/1.0/', to 
+   import real time solar wind observations from the L1 Lagrange point and 
+   ground geomagnetic observations from the UK's three geomagnetic 
+   observatories operated by the British Geological Survey.
+
+Outputs: these are each in directory 'Forecast/Temp_storage_for_output_GGF_forecast':
+ - real_time_forecast_charts_from_program_GGF_RTFH_version_BRTFHv2p4.eps
+    - Description: a chart with 7 panels. The upper 6 show the the past 24 
+      hours of data from the Lerwick (Ler), Eskdalemuir (Esk) and Hartland 
+      (Har) geomagnetic observatories, after removal of the core and crustal 
+      field estimates, to leave the external magnetic field perturbation. These 
+      data are shown in green lines, for the x and y components. In each of the 
+      same 6 panels, we also show the mean of the predictions from the 100 
+      model ensemble (described above under 'Program objectives') as a black 
+      line. The grey shaded region spans the maximum and minimum of the 
+      ensemble forecasts at each epoch. The vertical black dashed line 
+      indicates the current time in UTC (i.e. the epoch when this program was 
+      run). The model predictions to the right hand side of the dashed line 
+      show the forecast span of the regression model. The lowermost of the 7 
+      panels shows the predictions of substorm onset likelihood for the hour 
+      following each prediction epoch, which are produced by the convolutional 
+      neural network model.
+    - Source: made by program GGF_RTFH.py.
+    - Format: encapsulated postscript (eps) format.
+ - real_time_magnetic_field_forecast_from_program_GGF_RTFH_version_BRTFHv2p4.dat
+    - Description: an ascii-formatted text file of the hindcast and forecast 
+      values from the regression model ensemble (for the ground geomagnetic 
+      perturbation) and the convolutional neural network model (for the 
+      substorm onset likelihood). The hindcast values extend 24 hours into the 
+      past from the present time, and the forecast values extend about one hour
+      into the future (the exact forecast span is dynamic and depends on the 
+      solar wind speed).
+    - Source: made by program GGF_RTFH.py.
+    - Format: the column format is as follows: [Day-Month-Year,  Hour:Minute,  
+      Model Type Flag,  Substorm onset probability, Esk x mean,  Esk y mean,  
+      Esk z mean,  Had x mean,  Had y mean,  Had z mean,  Ler x mean,  
+      Ler y mean,  Ler z mean,  Esk x min,   Esk y min,   Esk z min,  
+      Had x min,   Had y min,   Had z min,   Ler x min,   Ler y min,  
+      Ler z min,   Esk x max,   Esk y max,   Esk z max,   Had x max,   
+      Had y max,   Had z max,   Ler x max,   Ler y max,   Ler z max], where
+      'Esk' is the observatory Eskdalemuir, 'Har' is Hartland, 'Ler' is 
+      Lerwick, 'x','y','z' are the ground geomagnetic field perturbation 
+      components, 'mean' is the mean value of the 100 model ensemble at a given 
+      epoch, and likewise for 'max' and 'min'. The Model Type Flag has the 
+      following meanings. 0: no problems: model forecast is based on the 
+      epsilon coupling function. 1: some parts of the solar wind data were not 
+      available for this epoch of the real-time solar wind stream, so the 
+      forecast is based on interpolated values. 2: there were no solar wind 
+      data at this epoch, so the output is nan. The substorm onset probability 
+      defines the onset likelihood (from 0 to 1, with 1 the most likely), for 
+      the hour after the model run time. Hence, the onset forecast is only 
+      valid for that hour: the output file has nan values for onset 
+      probabilities at forecast epochs greater than [current time + 60 mins].
+
+Instructions for running this program:
+ This program can be run on any machine with internet access. This is required
+ for downloading the real-time API data. Optionally, the program can also be 
+ run in a virtual environment using Docker (instructions below) -- in this 
+ case, internet access is required to import the code files from a github 
+ repository. Before running, the user should set the 'in_docker' flag to True 
+ or False, dependent on whether the program is being run in Docker. If running 
+ locally, the user should manually set the variable 'WORKDIR', dependent on 
+ where the code is stored. If running on a BAS machine, the code is in this 
+ directory: /data/psdcomplexity/eimf/SAGE_Model_Handover/Forecast.
+
+Instructions for running in Docker:
+ - Install Docker on the local machine.
+ - Set the 'in_docker' flag in the code below to True.
+ - The Dockerfile can then be run using the following commands:
+    - docker builder prune -a (to remove previous cloned github repositories and make room for newer ones)
+    - docker build -f [on the local machine, the directory and filename of the Dockerfile stored here in Forecast/Dockerfile] -t ggf_image . (to build the image)
+    - docker run --name ggfh_container ggf_image GGF_RTFH.py (to run the Python script 'GGF_RTFH.py' from the image in a container)
+    - docker cp ggfh_container:/root/run_environment/Temp_storage_for_output_GGF_forecast/ [on the local machine, the directory where you wish the output of the Python script to be copied to] (this copies the output forecast & hindcast from a location in the Docker container to somewhere else on the local machine)
+
+@author: robore@bas.ac.uk. Robert Shore, ORCID: orcid.org/0000-0002-8386-1425.
+For author's reference: this program was based on program 
+ BGS_RealTime_Forecast_and_Hindcast_v2p4.py, shorthand 'BRTFHv2p4'.
 """
-output_version_identifier = 'BRTFHv2p3'#Version string, for author's reference.
+output_version_identifier = 'BRTFHv2p4'#Version string, for author's reference.
 
 #%% Load packages.
 
@@ -53,7 +175,6 @@ import time
 import math
 import pickle
 import datetime as dt
-#import keras
 from tensorflow import keras
 import pandas
 import requests
@@ -67,13 +188,20 @@ deg = 180 / np.pi #scalar
 
 
 #Define flag to switch between developing on Windows and running in Docker.
-in_docker = True
+#in_docker = True
+in_docker = False
 
 #Set directory variables dependent on run-environment.
 if in_docker:
     WORKDIR = os.path.join(os.sep,'root','run_environment')
 else:
-    WORKDIR = os.path.join('C:' + os.sep,'Users','robore','BAS_Files','Research','Code','SAGE','GGF_realtime_forecast')
+    #!!!!
+    #Windows.
+    WORKDIR = os.path.join('C:' + os.sep,'Users','robore','BAS_Files','Research','Code','SAGE','SAGE_Model_Handover','Forecast')
+    
+    #!!!!
+    #bslthemesa.
+    #WORKDIR = os.path.join(os.sep,'local','users','robore','shortcut_EIMF_data','SAGE_Model_Handover','Forecast')
 #End conditional: tell the program whether to run in Docker or through Windows.
 
 #%% Define LT bins used by the model, at 180 mins width and 60 mins cadence.
@@ -134,12 +262,12 @@ if(LT_bin_ends_day_fraction[len(LT_bin_ends_day_fraction)-1,0] == 0):
 # performed by program 'RTRv3p0'.
 
 #Load the model coefficients.
-with open(os.path.join(WORKDIR,'Storage_for_model_coefficients','RTRv3p0_model_reg_coefs.pkl'),'rb') as f:  # Python 3: open(..., 'rb')
-    model_coefficients_all_stations_all_components_all_ensemble = pickle.load(f)
+with open(os.path.join(WORKDIR,'Storage_for_model_coefficients','GGF_Training_Model_Dataset_of_Stored_Model_Coefficients.pkl'),'rb') as f:  # Python 3: open(..., 'rb')
+    all_randomised_storms_sets_model_coeffs = pickle.load(f)
 #End indenting for this load command.
 
-#De-convert from list.
-model_coefficients_all_stations_all_components_all_ensemble = model_coefficients_all_stations_all_components_all_ensemble[0]#size [3 stations by 24 LT bins by 3 components by 6 model parameters by 100 trained model ensemble instances].
+#Rename, and extract from list.
+model_coefficients_all_stations_all_components_all_ensemble = all_randomised_storms_sets_model_coeffs[0]#size [3 stations by 24 LT bins by 3 components by 6 model parameters by 100 trained model ensemble instances].
 
 #%% Define Met Office API key.
 
@@ -1034,12 +1162,12 @@ axes[6].legend()
 plt.xticks(rotation=0)
 
 #Save figure as eps.
-plt.savefig(os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTF_version_' + output_version_identifier + '.eps'), format='eps')
+plt.savefig(os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast', 'real_time_forecast_charts_from_program_GGF_RTFH_version_' + output_version_identifier + '.eps'), format='eps')
 
 #%% Format and save out the forecast data file.
 
 #Define filename for real-time geomagnetic forecast output.
-real_time_solar_wind_data_output_filename = os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast','real_time_magnetic_field_forecast_from_program_GGF_RTF_version_' + output_version_identifier + '.dat')
+real_time_solar_wind_data_output_filename = os.path.join(WORKDIR,'Temp_storage_for_output_GGF_forecast','real_time_magnetic_field_forecast_from_program_GGF_RTFH_version_' + output_version_identifier + '.dat')
 
 #Delete any existing data file of solar wind-based geomagnetic forecast outputs.
 if(os.path.isfile(real_time_solar_wind_data_output_filename)):
